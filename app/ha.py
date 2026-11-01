@@ -209,7 +209,7 @@ class HomeAssistant:
     def _set_status(self, status):
         connected = status == 'connected'
         if status != self.status:
-            (Log.info if connected else Log.warn)(TAG, 'Home Assistant: {}'.format(status))
+            (Log.info if status in ('connected', 'connecting') else Log.warn)(TAG, 'Home Assistant: {}'.format(status))
         self.status = status
         if connected != self.connected:
             self.connected = connected

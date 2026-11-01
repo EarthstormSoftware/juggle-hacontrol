@@ -47,6 +47,23 @@ def test_addresses_it_cant_have_are_refused(device, address):
     assert device.settings.get('ha', 'address') == ''
 
 
+def test_the_tiles_are_kept_and_watched_in_home_assistant(device):
+    tiles = [{'entity_id': 'light.kitchen', 'name': 'Worktop'}, {'entity_id': 'sensor.hall'}]
+    assert device.change({'screen': {'tiles': tiles}}) is None
+    assert product.connection(device).watched == ['light.kitchen', 'sensor.hall']
+    assert [(t.entity_id, t.name) for t in product.chosen_tiles(device)] == [('light.kitchen', 'Worktop'),
+                                                                         ('sensor.hall', None)]
+
+
+@pytest.mark.parametrize('tiles', [
+    'light.kitchen', [{'entity_id': 'automation.night'}], [{'entity_id': 'light.kitchen'}] * 2,
+    [{'entity_id': 'light.Kitchen'}], [{'entity_id': 'light.kitchen', 'name': 'x' * 33}],
+    [{'entity_id': 'light.kitchen', 'colour': 'red'}], [{'entity_id': 'sensor.s{}'.format(n)} for n in range(9)]])
+def test_tiles_that_cant_be_are_refused(device, tiles):
+    assert device.change({'screen': {'tiles': tiles}}) is not None
+    assert device.settings.get('screen', 'tiles') == []
+
+
 def test_the_version_is_the_manifests():
     manifest = json.loads((product.Path(product.__file__).parent / 'app.json').read_text())
     assert product.VERSION == manifest['version']
