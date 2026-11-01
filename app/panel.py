@@ -16,6 +16,7 @@ MUTED = (150, 155, 170)
 TILE = (44, 48, 60)
 TILE_ON = (250, 190, 70)
 TEXT_ON = (24, 22, 18)
+WARNING = (240, 150, 90)
 # How much lighter a tile is while it's touched
 PRESSED = 40
 MARGIN = 16
@@ -24,6 +25,7 @@ CLOCK_HEIGHT = 120
 TILE_WIDTH = 180  # at least: the columns are as many as fit
 TILE_HEIGHT = 120
 RADIUS = 18
+STATUS_HEIGHT = 36
 
 
 class Tile:
@@ -50,6 +52,9 @@ class Panel:
         self.fonts = {size: ImageFont.load_default(size) for size in (20, 28, 72)}
         self.pressed = None
         self.minute = None
+        # A line at the bottom saying what's wrong (Home Assistant not connected), or None
+        self.status = None
+        self.shown = False
         self.layout()
 
     def layout(self):
@@ -86,12 +91,28 @@ class Panel:
         self.draw.text((left + 20, bottom - 20), tile.state_text(), font=self.fonts[20], fill=state, anchor='ls')
         return tile.box
 
+    def draw_status(self):
+        box = (0, self.height - STATUS_HEIGHT, self.width, self.height)
+        self.draw.rectangle(box, fill=BACKGROUND)
+        if self.status:
+            self.draw.text((self.width // 2, self.height - STATUS_HEIGHT // 2), self.status, font=self.fonts[20],
+                           fill=WARNING, anchor='mm')
+        return box
+
+    def set_status(self, status):
+        if status != self.status:
+            self.status = status
+            if self.shown:
+                self.screen.show(self.image, self.draw_status())
+
     def show_all(self):
         self.draw.rectangle((0, 0, self.width, self.height), fill=BACKGROUND)
         self.draw_clock()
         for tile in self.tiles:
             self.draw_tile(tile)
+        self.draw_status()
         self.screen.show(self.image)
+        self.shown = True
 
     def touched(self, kind, x, y):
         """A touch from the screen: ('down' | 'move' | 'up', x, y)."""

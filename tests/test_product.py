@@ -1,4 +1,4 @@
-"""Hello's own part, on App Base's real device and settings (saved in a temporary folder)."""
+"""The panel's own part, on App Base's real device and settings (saved in a temporary folder)."""
 import json
 import types
 
@@ -10,48 +10,41 @@ from base.device import Device
 
 @pytest.fixture
 def device(tmp_path):
-    platform = types.SimpleNamespace(state_path=lambda name: str(tmp_path / name), device_name=lambda: 'hello',
+    platform = types.SimpleNamespace(state_path=lambda name: str(tmp_path / name), device_name=lambda: 'panel',
                                      NAME_EDITABLE=False, health=lambda: {}, SENSORS=())
-    d = Device(product, platform)
-    d.states = 0
-
-    def state_changed():
-        d.states += 1
-    d.state_changed = state_changed
-    return d
+    return Device(product, platform)
 
 
-def test_the_greeting_starts_as_the_default(device):
-    assert product.state(device) == {'greeting': 'Hello from Juggle OS'}
-    assert product.info(device) == {'greeting': 'Hello from Juggle OS'}
+def test_without_settings_home_assistant_isnt_set_up(device):
+    assert product.info(device)['home_assistant'] == {'status': 'not set up', 'connected': False, 'version': None}
+    assert product.state(device) == {'home_assistant': 'not set up'}
 
 
-def test_a_greeting_from_mqtt_is_saved_and_its_state_sent(device, tmp_path):
-    assert product.set(device, {'greeting': 'Morning'}) is None
-    assert product.state(device) == {'greeting': 'Morning'}
-    assert device.states == 1
-    assert json.loads((tmp_path / 'config.json').read_text())['hello']['greeting'] == 'Morning'
+def test_the_token_is_kept_but_only_shown_as_set(device, tmp_path):
+    assert device.change({'ha': {'address': '192.168.1.10', 'token': 'secret-token'}}) is None
+    view = device.settings.view()['ha']
+    assert view == {'address': '192.168.1.10', 'token_set': True}
+    assert json.loads((tmp_path / 'config.json').read_text())['ha']['token'] == 'secret-token'
 
 
-def test_the_same_greeting_again_sends_no_state(device):
-    assert product.set(device, {'greeting': 'Hello from Juggle OS'}) is None
-    assert device.states == 0
+def test_new_settings_go_to_the_connection_at_once(device):
+    ha = product.connection(device)
+    device.change({'ha': {'address': 'homeassistant.local:8124', 'token': 'abc'}})
+    assert (ha.address, ha.token) == ('homeassistant.local:8124', 'abc')
+    device.change({'ha': {'token': None}})  # removed on the page
+    assert ha.token == ''
 
 
-@pytest.mark.parametrize('command', [{'greeting': ''}, {'greeting': '   '}, {'greeting': 'x' * 65},
-                                     {'greeting': 5}, {'colour': 'red'}])
-def test_a_wrong_command_is_refused_and_changes_nothing(device, command):
-    assert product.set(device, command)
-    assert product.state(device) == {'greeting': 'Hello from Juggle OS'}
-    assert device.states == 0
+@pytest.mark.parametrize('address', ['', '192.168.1.10', 'homeassistant.local:8123', 'http://192.168.1.10:8123',
+                                     'ws://ha.example/'])
+def test_addresses_home_assistant_can_have(device, address):
+    assert device.change({'ha': {'address': address}}) is None
 
 
-def test_home_assistant_gets_a_text_box_that_sends_json():
-    config = product.ha_entity(None, 'greeting', {'set': 'home/hello/set'})
-    assert product.HA_ENTITIES == (('text', 'greeting'),)
-    assert config['command_topic'] == 'home/hello/set'
-    assert config['max'] == product.GREETING_LONGEST
-    assert 'tojson' in config['command_template']
+@pytest.mark.parametrize('address', ['https://192.168.1.10', 'ha local', '192.168.1.10:99999', 'http://', 5])
+def test_addresses_it_cant_have_are_refused(device, address):
+    assert device.change({'ha': {'address': address}}) is not None
+    assert device.settings.get('ha', 'address') == ''
 
 
 def test_the_version_is_the_manifests():

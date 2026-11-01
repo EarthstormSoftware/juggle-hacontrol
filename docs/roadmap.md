@@ -55,7 +55,9 @@ The app says `"juggle": "1.1"` and `"display": true`.
 ### Home Assistant
 
 - **The WebSocket API** (`ws://<address>:8123/api/websocket`) with a long-lived access token: `auth`, then
-  `get_states` for the start, `subscribe_events` for `state_changed` (each tile's entity), and `call_service`
+  `subscribe_entities` for just the tiles' entities (their state at once, then only what changes in them: not
+  every `state_changed` in the house, too much for a Pi 2 to parse), `get_states` only when the page lists them all
+  to choose from, and `call_service`
   (`light.toggle`, `light.turn_on` with `brightness_pct`). It reconnects by itself, with a growing wait, and the
   screen and the page say when it isn't connected.
 - **The address and token are settings**, on the app's page. The token is kept in the app's state on the Pi (root and

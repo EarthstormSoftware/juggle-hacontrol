@@ -3,11 +3,10 @@
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>HA Control Panel</title>
-<!-- A waving hand's palm: a rounded square with a wave mark -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='6' fill='%233DDC84'/%3E%3Cpath d='M9 18c2-6 5-6 7 0s5 6 7 0' fill='none' stroke='%2322242f' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<!-- A panel: a rounded square with four tiles -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='6' fill='%2322242f'/%3E%3Crect x='7' y='7' width='8' height='8' rx='2' fill='%23FABE46'/%3E%3Crect x='17' y='7' width='8' height='8' rx='2' fill='%235a6070'/%3E%3Crect x='7' y='17' width='8' height='8' rx='2' fill='%235a6070'/%3E%3Crect x='17' y='17' width='8' height='8' rx='2' fill='%235a6070'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/base.css">
 <style>
-.greeting{font-size:22px;font-weight:700;color:var(--text);text-align:center;margin:8px 0 16px;overflow-wrap:anywhere}
 .facts{display:grid;grid-template-columns:minmax(96px,max-content) 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px}
 .facts dt{color:var(--muted)}
 .facts dd{color:var(--text);overflow-wrap:anywhere}
@@ -27,49 +26,55 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
   <div class="health" id="health"></div>
 </header>
 <div class="alert" id="alert" role="alert" hidden></div>
-<noscript><p class="noscript">This page needs JavaScript. Turn it on for this site, then reload.</p></noscript>
 
-<input type="radio" name="t" id="th" data-pane="ph" aria-label="Hello tab" checked>
+<input type="radio" name="t" id="th" data-pane="ph" aria-label="Home Assistant tab" checked>
 <input type="radio" name="t" id="td" data-pane="pd" aria-label="Device tab">
 <input type="radio" name="t" id="tm" data-pane="pm" aria-label="MQTT tab">
 <nav>
-  <label for="th">Hello</label>
+  <label for="th">Home Assistant</label>
   <label for="td">Device</label>
   <label for="tm">MQTT</label>
 </nav>
 
-<!-- HELLO PANEL: the app's own -->
+<!-- HOME ASSISTANT PANEL: the app's own -->
 <div class="pane" id="ph">
-  <p class="greeting" id="greeting">&hellip;</p>
   <form class="settings">
+    <div class="sec">Connection</div>
     <div class="frow">
-      <div class="field"><label for="greeting_text">Greeting</label>
-        <input type="text" required name="hello.greeting" id="greeting_text" maxlength="64" aria-describedby="greeting_help">
+      <div class="field"><label for="ha_address">Address</label>
+        <input type="text" name="ha.address" id="ha_address" maxlength="260" placeholder="192.168.1.10 or homeassistant.local" aria-describedby="ha_address_help" spellcheck="false" autocapitalize="off">
+      </div>
+      <div class="field"><label for="ha_token">Access Token</label>
+        <input type="password" name="ha.token" id="ha_token" maxlength="1024" placeholder="leave blank to keep" autocomplete="off" aria-describedby="ha_token_help">
       </div>
     </div>
-    <p class="note" id="greeting_help">Kept through deploys and OS updates. MQTT and Home Assistant can change it too.</p>
+    <p class="note" data-password-set="ha.token" hidden>A token is set. <button type="button" class="reset" data-clear-password="ha.token">Remove the token</button></p>
+    <p class="note" id="ha_address_help">Home Assistant on your network: its address, with <code>:port</code> if it isn't 8123.</p>
+    <p class="note" id="ha_token_help">A long-lived access token, made in Home Assistant (your profile, Security). It's kept on the Pi and never shown here again.</p>
     <button type="submit" class="btn-full save" disabled>Save</button>
     <p class="msg" role="status" aria-live="polite"></p>
   </form>
 
   <div class="status">
   <div>
-  <div class="sec">The Pi</div>
+  <div class="sec">Home Assistant</div>
   <dl class="facts">
-    <dt>Up for</dt><dd id="s_uptime">&mdash;</dd>
-    <dt>Temperature</dt><dd id="s_temperature">&mdash;</dd>
-    <dt>Free memory</dt><dd id="s_mem">&mdash;</dd>
-    <dt>Load</dt><dd id="s_load">&mdash;</dd>
-    <dt>Time</dt><dd id="s_time">&mdash;</dd>
+    <dt>Connection</dt><dd id="s_ha">&mdash;</dd>
+    <dt>Version</dt><dd id="s_ha_version">&mdash;</dd>
   </dl>
+  <div class="buttons"><button type="button" class="btn-full quiet" id="list_entities">List its lights and sensors</button></div>
+  <p class="msg" id="entities_msg" role="status" aria-live="polite"></p>
+  <dl class="facts" id="entities"></dl>
   </div>
   <div>
-  <div class="sec">Software</div>
+  <div class="sec">The Pi</div>
   <dl class="facts">
-    <dt>Hello</dt><dd id="s_version">&mdash;</dd>
+    <dt>Panel</dt><dd id="s_version">&mdash;</dd>
     <dt>Running for</dt><dd id="s_app_uptime">&mdash;</dd>
     <dt>Juggle OS</dt><dd id="s_os">&mdash;</dd>
-    <dt>MQTT</dt><dd id="s_mqtt">&mdash;</dd>
+    <dt>Up for</dt><dd id="s_uptime">&mdash;</dd>
+    <dt>Temperature</dt><dd id="s_temperature">&mdash;</dd>
+    <dt>Time</dt><dd id="s_time">&mdash;</dd>
   </dl>
   </div>
   </div>
@@ -78,9 +83,9 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
 <!-- DEVICE AND MQTT PANELS: App Base's (base.js), as on every Juggle app -->
 <div class="pane" id="pd" data-base-pane="device"></div>
 <div class="pane" id="pm" data-base-pane="mqtt">
-  <template data-slot="mqtt-does">read and change the greeting</template>
-  <template data-slot="ha-what">Hello</template>
-  <template data-slot="ha-adds">Home Assistant adds the greeting automatically (MQTT discovery), as a text box.</template>
+  <template data-slot="mqtt-does">say whether it's connected to Home Assistant</template>
+  <template data-slot="ha-what">The panel</template>
+  <template data-slot="ha-adds">The panel talks to Home Assistant directly, so MQTT discovery adds nothing.</template>
 </div>
 
 <footer id="footer"></footer>
@@ -90,31 +95,31 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
 var el = Base.el;
 
 Base.onInfo(function (i) {
-  el('state').textContent = 'Running';
-  el('greeting').textContent = i.greeting;
-  el('s_uptime').textContent = Base.duration(i.uptime_s);
-  el('s_temperature').textContent = i.temperature_c != null ? i.temperature_c + ' °C' : '—';
-  el('s_mem').textContent = i.mem_free != null ? Math.round(i.mem_free / 1048576) + ' MiB' : '—';
-  el('s_load').textContent = i.load != null ? i.load : '—';
-  el('s_time').textContent = i.time ? i.time.replace('T', ' ') + (i.time_zone ? ' (' + i.time_zone + ')' : '') : '—';
+  var ha = i.home_assistant || {};
+  el('state').textContent = ha.connected ? 'Connected' : 'Not connected';
+  el('s_ha').textContent = ha.status ? ha.status.charAt(0).toUpperCase() + ha.status.slice(1) : '—';
+  el('s_ha_version').textContent = ha.version || '—';
   el('s_version').textContent = i.version;
   el('s_app_uptime').textContent = Base.duration(i.app_uptime_s);
   el('s_os').textContent = i.os && i.os.version ? i.os.version + (i.os.slot ? ', slot ' + i.os.slot : '') : 'Not on a Pi';
-  el('s_mqtt').textContent = !i.mqtt.enabled ? 'Off' : i.mqtt.connected ? 'Connected' : 'Not connected';
-  showTopics();
+  el('s_uptime').textContent = Base.duration(i.uptime_s);
+  el('s_temperature').textContent = i.temperature_c != null ? i.temperature_c + ' °C' : '—';
+  el('s_time').textContent = i.time ? i.time.replace('T', ' ') + (i.time_zone ? ' (' + i.time_zone + ')' : '') : '—';
 });
 
-// The topics under the topic base, as they'll be once saved
-function showTopics() {
-  var i = Base.info(), p = el('topic_preview'), base = el('topic_base').value.trim();
-  p.textContent = '';
-  if (!base || !i) return;
-  base = base.split('{name}').join(i.name);
-  [['State', '/state'], ['Commands', '/set'], ['Online status', '/status']].forEach(function (x) {
-    p.appendChild(Base.mk('div', { text: x[0] + ': ' }, [Base.mk('code', { text: base + x[1] })]));
-  });
-}
-el('topic_base').addEventListener('input', showTopics);
+// What Home Assistant has, to check the connection (and, next, to choose the tiles from)
+el('list_entities').addEventListener('click', function () {
+  var list = el('entities');
+  Base.say('entities_msg', 'Asking Home Assistant…', true);
+  Base.api('/api/ha/entities').then(function (r) {
+    list.textContent = '';
+    r.entities.forEach(function (e) {
+      list.appendChild(Base.mk('dt', { text: e.name }));
+      list.appendChild(Base.mk('dd', { text: e.state + (e.unit ? ' ' + e.unit : '') + ' (' + e.entity_id + ')' }));
+    });
+    Base.say('entities_msg', r.entities.length + ' found.', true);
+  }).catch(function (e) { Base.say('entities_msg', 'Could not list them: ' + e.message); });
+});
 
 Base.start();
 </script>
