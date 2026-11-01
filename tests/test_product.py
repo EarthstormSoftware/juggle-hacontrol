@@ -57,4 +57,4 @@ def test_home_assistant_gets_a_text_box_that_sends_json():
 def test_the_version_is_the_manifests():
     manifest = json.loads((product.Path(product.__file__).parent / 'app.json').read_text())
     assert product.VERSION == manifest['version']
-    assert manifest['juggle'] == '1.0' and manifest['name'] == 'hacontrol'
+    assert manifest['juggle'] == '1.1' and manifest['name'] == 'hacontrol' and manifest['display'] is True

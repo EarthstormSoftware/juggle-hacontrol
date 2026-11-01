@@ -1,5 +1,6 @@
 {
-  "juggle": "1.0",
+  "juggle": "1.1",
   "name": "hacontrol",
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "display": true
 }
