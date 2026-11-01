@@ -23,6 +23,9 @@
 .row .reset{padding:6px 10px}
 .reset.inline{display:inline-flex;padding:3px 8px;font-size:12px}
 #entities{max-height:420px;overflow-y:auto}
+.pages{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.pages .chosen{border-color:var(--accent);color:var(--text)}
+.pane > .acts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
 /* With MQTT off there's nothing else to set */
 form:has(#mqtt_enabled:not(:checked)) .mqtt-more{display:none}
 form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
@@ -37,23 +40,36 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
 </header>
 <div class="alert" id="alert" role="alert" hidden></div>
 
-<input type="radio" name="t" id="tt" data-pane="pt" aria-label="Tiles tab" checked>
+<input type="radio" name="t" id="tt" data-pane="pt" aria-label="Screen tab" checked>
 <input type="radio" name="t" id="th" data-pane="ph" aria-label="Home Assistant tab">
 <input type="radio" name="t" id="td" data-pane="pd" aria-label="Device tab">
 <input type="radio" name="t" id="tm" data-pane="pm" aria-label="MQTT tab">
 <nav>
-  <label for="tt">Tiles</label>
+  <label for="tt">Screen</label>
   <label for="th">Home Assistant</label>
   <label for="td">Device</label>
   <label for="tm">MQTT</label>
 </nav>
 
-<!-- TILES PANEL: what the screen shows -->
+<!-- SCREEN PANEL: what the screen shows -->
 <div class="pane" id="pt">
-  <div class="sec">On the Screen</div>
+  <div class="sec">Pages</div>
+  <div class="pages" id="pages"></div>
+  <div class="frow">
+    <div class="field"><label for="page_name">This Page's Name</label>
+      <input type="text" id="page_name" maxlength="20" placeholder="such as Kitchen" autocomplete="off">
+    </div>
+  </div>
+  <div class="acts">
+    <button type="button" class="reset" id="page_earlier" title="Earlier">← Earlier</button>
+    <button type="button" class="reset" id="page_later" title="Later">Later →</button>
+    <button type="button" class="reset" id="page_remove">Remove this page</button>
+  </div>
+
+  <div class="sec">Its Tiles</div>
   <p class="note" id="tiles_empty" hidden>None yet: add them from Home Assistant's below.</p>
   <div class="rows" id="tiles_list"></div>
-  <p class="note">In this order, across then down. A name here replaces Home Assistant's on the screen. Tap a light or switch to switch it; hold a light to set its brightness.</p>
+  <p class="note">In this order, across then down. A name here replaces Home Assistant's on the screen. Tap a light or switch to switch it; hold a light to set its brightness. With more than one page, the screen's top bar has a tab for each, and a swipe across changes the page.</p>
   <button type="button" class="btn-full" id="tiles_save" disabled>Save</button>
   <p class="msg" id="tiles_msg" role="status" aria-live="polite"></p>
 
@@ -65,6 +81,21 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
   </div>
   <div class="rows" id="entities"></div>
   <p class="note"><span id="entities_note"></span> <button type="button" class="reset inline" id="entities_reload">Ask again</button></p>
+
+  <form class="settings">
+    <div class="sec">The Screen</div>
+    <div class="frow">
+      <div class="field"><label for="timeout_minutes">Dark After (minutes untouched, 0 for never)</label>
+        <input type="number" required name="screen.timeout_minutes" id="timeout_minutes" min="0" max="240" step="1">
+      </div>
+      <div class="field"><label for="brightness">Brightness (%)</label>
+        <input type="number" required name="screen.brightness" id="brightness" min="5" max="100" step="5">
+      </div>
+    </div>
+    <p class="note">When it's dark, a touch only wakes it.</p>
+    <button type="submit" class="btn-full save" disabled>Save</button>
+    <p class="msg" role="status" aria-live="polite"></p>
+  </form>
 </div>
 
 <!-- HOME ASSISTANT PANEL: the app's own -->
@@ -135,12 +166,33 @@ Base.onInfo(function (i) {
   el('s_time').textContent = i.time ? i.time.replace('T', ' ') + (i.time_zone ? ' (' + i.time_zone + ')' : '') : '—';
 });
 
-// The tiles: Home Assistant's entities, in order, each with a name of its own if wanted (screen.tiles). The chosen
-// ones are edited here and saved together; the ones to add come from Home Assistant, filtered by what's typed.
-var MOST_TILES = 8, tiles = null, entities = [], names = {};
+// The pages and their tiles (screen.pages): Home Assistant's entities, in order, each with a name of its own if
+// wanted. They're edited here, one page at a time, and saved together; the tiles to add come from Home Assistant,
+// filtered by what's typed.
+var MOST_PAGES = 6, MOST_TILES = 8, pages = null, current = 0, entities = [], names = {};
+
+function page() { return pages[current]; }
+
+function showPages() {
+  var row = el('pages');
+  row.textContent = '';
+  pages.forEach(function (p, n) {
+    var b = Base.mk('button', { type: 'button', className: 'reset' + (n === current ? ' chosen' : ''),
+      text: p.name || 'Page ' + (n + 1) });
+    b.addEventListener('click', function () { current = n; showAll(); });
+    row.appendChild(b);
+  });
+  var add = Base.mk('button', { type: 'button', className: 'reset', text: '+ Page', disabled: pages.length >= MOST_PAGES });
+  add.addEventListener('click', function () { pages.push({ name: '', tiles: [] }); current = pages.length - 1; showAll(); changed(); });
+  row.appendChild(add);
+  el('page_name').value = page().name;
+  el('page_earlier').disabled = current === 0;
+  el('page_later').disabled = current === pages.length - 1;
+  el('page_remove').disabled = pages.length === 1;
+}
 
 function showTiles() {
-  var list = el('tiles_list');
+  var list = el('tiles_list'), tiles = page().tiles;
   list.textContent = '';
   el('tiles_empty').hidden = tiles.length > 0;
   tiles.forEach(function (t, n) {
@@ -161,13 +213,14 @@ function showTiles() {
 }
 
 function showEntities() {
-  var list = el('entities'), filter = el('entity_filter').value.trim().toLowerCase(), chosen = {}, shown = 0;
+  var list = el('entities'), filter = el('entity_filter').value.trim().toLowerCase(), chosen = {}, shown = 0,
+    tiles = page().tiles, full = tiles.length >= MOST_TILES;
   tiles.forEach(function (t) { chosen[t.entity_id] = true; });
   list.textContent = '';
   entities.forEach(function (e) {
     if (chosen[e.entity_id] || (filter && (e.name + ' ' + e.entity_id).toLowerCase().indexOf(filter) < 0)) return;
     shown++;
-    var add = Base.mk('button', { type: 'button', className: 'reset', text: 'Add', disabled: tiles.length >= MOST_TILES });
+    var add = Base.mk('button', { type: 'button', className: 'reset', text: 'Add', disabled: full });
     add.addEventListener('click', function () {
       tiles.push({ entity_id: e.entity_id, name: '' });
       showTiles(); showEntities(); changed();
@@ -177,9 +230,11 @@ function showEntities() {
         Base.mk('span', { className: 'id', text: e.entity_id + ' · ' + e.state + (e.unit ? ' ' + e.unit : '') })]),
       Base.mk('div', { className: 'acts' }, [add])]));
   });
-  el('entities_note').textContent = tiles.length >= MOST_TILES ? 'The screen has room for ' + MOST_TILES + ' tiles.'
+  el('entities_note').textContent = full ? 'A page has room for ' + MOST_TILES + ' tiles.'
     : entities.length ? shown + ' of ' + entities.length + ' shown.' : '';
 }
+
+function showAll() { showPages(); showTiles(); showEntities(); }
 
 function changed() { el('tiles_save').disabled = false; Base.say('tiles_msg', ''); }
 
@@ -189,23 +244,42 @@ function loadEntities() {
     entities = r.entities;
     entities.forEach(function (e) { names[e.entity_id] = e.name; });
     Base.say('tiles_msg', '', true);
-    showTiles(); showEntities();
+    showAll();
   }).catch(function (e) { Base.say('tiles_msg', 'Could not ask Home Assistant: ' + e.message); });
 }
 
 Base.onInfo(function () {
   var c = Base.config();
-  if (tiles !== null || !c) return;
-  tiles = c.screen.tiles.map(function (t) { return { entity_id: t.entity_id, name: t.name || '' }; });
-  showTiles();
+  if (pages !== null || !c) return;
+  pages = c.screen.pages.map(function (p) {
+    return { name: p.name, tiles: p.tiles.map(function (t) { return { entity_id: t.entity_id, name: t.name || '' }; }) };
+  });
+  if (!pages.length) pages.push({ name: '', tiles: [] });
+  showAll();
   loadEntities();
+});
+el('page_name').addEventListener('input', function () { page().name = el('page_name').value; showPages(); changed(); });
+function movePage(by) {
+  return function () { pages.splice(current + by, 0, pages.splice(current, 1)[0]); current += by; showAll(); changed(); };
+}
+el('page_earlier').addEventListener('click', movePage(-1));
+el('page_later').addEventListener('click', movePage(1));
+el('page_remove').addEventListener('click', function () {
+  if (page().tiles.length && !confirm('Remove this page and its tiles?')) return;
+  pages.splice(current, 1);
+  current = Math.max(0, current - 1);
+  showAll(); changed();
 });
 el('entity_filter').addEventListener('input', showEntities);
 el('entities_reload').addEventListener('click', loadEntities);
 el('tiles_save').addEventListener('click', function () {
-  var saved = tiles.map(function (t) { return t.name.trim() ? { entity_id: t.entity_id, name: t.name.trim() } : { entity_id: t.entity_id }; });
+  var saved = pages.map(function (p) {
+    return { name: p.name.trim(), tiles: p.tiles.map(function (t) {
+      return t.name.trim() ? { entity_id: t.entity_id, name: t.name.trim() } : { entity_id: t.entity_id };
+    }) };
+  });
   Base.say('tiles_msg', 'Saving…', true);
-  Base.api('/api/config', { screen: { tiles: saved } }).then(function () {
+  Base.api('/api/config', { screen: { pages: saved } }).then(function () {
     el('tiles_save').disabled = true;
     Base.say('tiles_msg', 'Saved: the screen shows them now.', true);
   }).catch(function (e) { Base.say('tiles_msg', 'Not saved: ' + e.message); });

@@ -196,6 +196,8 @@ class HomeAssistant:
                 self._set_status('the token was refused: {}'.format(e))
                 retry = RETRY_MOST
             except (OSError, WebSocketError, RequestError, asyncio.TimeoutError, ValueError, KeyError) as e:
+                if self._wake.is_set():
+                    continue  # closed on purpose, for new settings or entities: straight back, saying nothing
                 if self.connected:  # it had worked: try again soon
                     retry = RETRY_FIRST
                 self._set_status('not connected: {}'.format(e or type(e).__name__))
@@ -219,7 +221,8 @@ class HomeAssistant:
 
     async def _session(self):
         host, port = parse_address(self.address)
-        self._set_status('connecting')
+        if not self.connected:  # coming back on purpose, the states shown stay until the new ones come
+            self._set_status('connecting')
         socket = await WebSocket.connect(host, port, PATH)
         try:
             await self._authenticate(socket)

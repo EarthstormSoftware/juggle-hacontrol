@@ -70,20 +70,30 @@ The app says `"juggle": "1.1"` and `"display": true`.
 
 ### The screen
 
-- **Tiles** in a grid, as many across as fit (four in landscape, two in portrait): a **light** (its name and state;
-  a tap toggles it, a long press opens its brightness), a **sensor** (its state and unit), and the **clock** (time
-  and date, at the top).
-- **Chosen on the web page**: the Tiles tab lists Home Assistant's lights and sensors (the page asks the app, which
-  asks Home Assistant), and the chosen ones go in order. A name of its own per tile, or Home Assistant's.
-- **Built for a finger**: tiles at least 80 px each way, a dark theme, and a press shown at once.
-- **The screen itself**: blank after so many minutes untouched (the first touch only wakes it), and dimmer at night.
+- **A bar along the top** (asked for 2026-11-01, in place of a large clock: the tiles matter more): the date and
+  time, and what's wrong (Home Assistant not connected, an action that failed) in place of the date.
+- **Tiles** filling the rest, as large as they can be: the grid's columns and rows are chosen for the number of
+  tiles and the screen's shape (five in landscape are three and two), never taller than wide. A **light** or
+  **switch** (a tap toggles it; a light shows its brightness, and a long press opens a slider for it), a **sensor**
+  (its state and unit, large; a timestamp as how long ago), or a **binary sensor** (on or off). A name wraps onto a
+  second line and shrinks to fit, keeping words whole if it can, then breaking them where they join (CounterTopLeft
+  at its capitals), and only then anywhere.
+- **Pages** (asked for 2026-11-01): up to six, each with a name and up to eight tiles. With more than one, the bar
+  has a tab for each in place of the date, and a swipe across changes the page. Every page's entities are watched,
+  so changing the page is at once.
+- **Chosen on the web page**: the Screen tab has the pages, each page's tiles in order (a name of its own per tile,
+  or Home Assistant's), and Home Assistant's lights, switches and sensors to add (the page asks the app, which asks
+  Home Assistant), filtered by what's typed.
+- **Built for a finger**: large tiles, a dark theme, and a press shown at once.
+- **The screen itself**: dark (the backlight off) after so many minutes untouched, 5 by default (0 for never), the
+  first touch only waking it; and its brightness. Both on the Screen tab. Dimmer at night could come later.
 - **On a PC**, the screen opens in a window (Tkinter, from Python's standard library), with the mouse as the finger,
   so most of the work is done without a Pi.
 
 ### Not in the first version
 
-More than one page (swiping between them), scenes, weather, cameras, other entity types (switches, covers,
-thermostats), talking to the Earthstorm lights directly, and `wss://`.
+Scenes, weather, cameras, other entity types (covers, thermostats), dimming at night, talking to the Earthstorm
+lights directly, and `wss://`.
 
 ## Steps
 
@@ -108,13 +118,17 @@ on the PC).
 The WebSocket client, the connection's settings on the page, its state on the page (a health chip) and the screen,
 and reconnecting. Tests against a stand-in server.
 
+Done (2026-11-01), connected to Home Assistant 2024.8.1.
+
 ### 5. Tiles
 
-Light and sensor tiles, their brightness and states, chosen and ordered on the Tiles tab.
+Light, switch and sensor tiles, their brightness and states, chosen and ordered on the page. Done (2026-11-01),
+then (the same day, asked for on seeing them) the bar in place of the clock, tiles sized to fill the screen with
+their text fitted, and pages.
 
 ### 6. The screen's settings
 
-Blanking after a time, waking on touch, dimming at night, the brightness.
+Dark after a time and waking on touch, and the brightness: done (2026-11-01). Dimming at night later.
 
 ### 7. 1.0
 

@@ -47,21 +47,36 @@ def test_addresses_it_cant_have_are_refused(device, address):
     assert device.settings.get('ha', 'address') == ''
 
 
-def test_the_tiles_are_kept_and_watched_in_home_assistant(device):
-    tiles = [{'entity_id': 'light.kitchen', 'name': 'Worktop'}, {'entity_id': 'sensor.hall'}]
-    assert device.change({'screen': {'tiles': tiles}}) is None
-    assert product.connection(device).watched == ['light.kitchen', 'sensor.hall']
-    assert [(t.entity_id, t.name) for t in product.chosen_tiles(device)] == [('light.kitchen', 'Worktop'),
-                                                                         ('sensor.hall', None)]
+def test_the_pages_are_kept_and_every_pages_entities_watched_once(device):
+    pages = [{'name': 'Kitchen', 'tiles': [{'entity_id': 'light.kitchen', 'name': 'Worktop'},
+                                           {'entity_id': 'sensor.hall'}]},
+             {'name': 'Hall', 'tiles': [{'entity_id': 'sensor.hall'}, {'entity_id': 'switch.fan'}]}]
+    assert device.change({'screen': {'pages': pages}}) is None
+    assert product.connection(device).watched == ['light.kitchen', 'sensor.hall', 'switch.fan']
+    chosen = product.chosen_pages(device)
+    assert [page.name for page in chosen] == ['Kitchen', 'Hall']
+    assert [(t.entity_id, t.name) for t in chosen[0].tiles] == [('light.kitchen', 'Worktop'), ('sensor.hall', None)]
 
 
-@pytest.mark.parametrize('tiles', [
-    'light.kitchen', [{'entity_id': 'automation.night'}], [{'entity_id': 'light.kitchen'}] * 2,
-    [{'entity_id': 'light.Kitchen'}], [{'entity_id': 'light.kitchen', 'name': 'x' * 33}],
-    [{'entity_id': 'light.kitchen', 'colour': 'red'}], [{'entity_id': 'sensor.s{}'.format(n)} for n in range(9)]])
-def test_tiles_that_cant_be_are_refused(device, tiles):
-    assert device.change({'screen': {'tiles': tiles}}) is not None
-    assert device.settings.get('screen', 'tiles') == []
+def page(tiles, name='Page'):
+    return [{'name': name, 'tiles': tiles}]
+
+
+@pytest.mark.parametrize('pages', [
+    'light.kitchen', page('light.kitchen'), page([{'entity_id': 'automation.night'}]),
+    page([{'entity_id': 'light.kitchen'}] * 2), page([{'entity_id': 'light.Kitchen'}]),
+    page([{'entity_id': 'light.kitchen', 'name': 'x' * 33}]), page([{'entity_id': 'light.kitchen', 'colour': 'red'}]),
+    page([{'entity_id': 'sensor.s{}'.format(n)} for n in range(9)]), page([], name='x' * 21),
+    [{'tiles': []}], page([]) * 7])
+def test_pages_that_cant_be_are_refused(device, pages):
+    assert device.change({'screen': {'pages': pages}}) is not None
+    assert device.settings.get('screen', 'pages') == []
+
+
+@pytest.mark.parametrize('values', [{'timeout_minutes': -1}, {'timeout_minutes': 241}, {'brightness': 4},
+                                    {'brightness': 101}])
+def test_the_screens_timeout_and_brightness_have_limits(device, values):
+    assert device.change({'screen': values}) is not None
 
 
 def test_the_version_is_the_manifests():

@@ -16,6 +16,10 @@ from pathlib import Path
 
 from PIL import Image, ImageChops
 
+from base.log import Log
+
+TAG = 'SCREEN'
+
 FRAMEBUFFER = Path('/dev/fb0')
 FRAMEBUFFER_INFO = Path('/sys/class/graphics/fb0')
 INPUT_DEVICES = Path('/proc/bus/input/devices')
@@ -146,6 +150,38 @@ def touch_device():
     return None
 
 
+class Backlight:
+    """The display's backlight, which Juggle OS lets an app with "display" change: on, off, and how bright."""
+    FOLDER = Path('/sys/class/backlight')
+    POWER_ON, POWER_OFF = 0, 4  # bl_power: FB_BLANK_UNBLANK, FB_BLANK_POWERDOWN
+
+    def __init__(self, folder):
+        self.folder = folder
+        self.most = int((folder / 'max_brightness').read_text())
+
+    @classmethod
+    def find(cls):
+        try:
+            return next((cls(folder) for folder in sorted(cls.FOLDER.iterdir())), None)
+        except (OSError, ValueError):
+            return None
+
+    def _write(self, name, value):
+        try:
+            (self.folder / name).write_text(str(value))
+        except OSError as e:
+            Log.warn(TAG, "Couldn't set the backlight's {}: {}".format(name, e))
+
+    def on(self):
+        self._write('bl_power', self.POWER_ON)
+
+    def off(self):
+        self._write('bl_power', self.POWER_OFF)
+
+    def set_brightness(self, percent):
+        self._write('brightness', max(1, round(self.most * percent / 100)))
+
+
 class PiScreen:
     """The Touch Display on a Pi running Juggle OS."""
 
@@ -153,6 +189,9 @@ class PiScreen:
         self.framebuffer = Framebuffer.open(rotation)
         self.size = self.framebuffer.size
         self.show = self.framebuffer.show
+        self.backlight = Backlight.find()
+        if self.backlight:
+            self.backlight.on()  # it may have been left off when the app last stopped
 
     async def run(self, touched):
         """Calls touched(kind, x, y) for each touch, for as long as the app runs."""
@@ -187,11 +226,26 @@ class Window:
         self.photo = ImageTk.PhotoImage(Image.new('RGB', size))
         tkinter.Label(self.root, image=self.photo, borderwidth=0).pack()
         self.picture = Image.new('RGB', size)
+        self.lit = True
+        self.backlight = self
 
     def show(self, image, box=None):
         box = box or (0, 0, *image.size)
         self.picture.paste(image.crop(box), box[:2])
+        if self.lit:
+            self.photo.paste(self.picture)
+
+    # The window is its own backlight: dark is black
+    def on(self):
+        self.lit = True
         self.photo.paste(self.picture)
+
+    def off(self):
+        self.lit = False
+        self.photo.paste(Image.new('RGB', self.size))
+
+    def set_brightness(self, percent):
+        pass
 
     async def run(self, touched):
         def mouse(kind):
