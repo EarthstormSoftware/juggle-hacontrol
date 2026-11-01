@@ -20,7 +20,7 @@ loop:
 
 ### Drawing to the screen
 
-Checked on the Pi 2 (2026-11-01, Juggle OS v1.1's development build, the display in portrait):
+Checked on the Pi 2 (2026-11-01, Juggle OS v1.1's development build, the display in portrait and landscape):
 
 - **pygame isn't used.** Debian's `python3-pygame` brings SDL2 with Mesa (LLVM 19 for its software renderer),
   Wayland and X11 libraries and numpy: 238 MB, on a root partition of 1.2 GB kept deliberately small.
@@ -35,7 +35,8 @@ Checked on the Pi 2 (2026-11-01, Juggle OS v1.1's development build, the display
   `/proc/bus/input/devices`), read in pure Python (`struct`), so nothing compiled is needed. Juggle OS turns its
   coordinates with the display, so they match what the app draws.
 - **Rotation**: Juggle OS's (`display-rotation`, from App Base's Device tab); the app reads it from
-  `app-request settings` and turns its image to match. The panel runs in portrait.
+  `app-request settings` and turns its image to match. The layout follows the screen's shape: landscape (800×480)
+  for now, at 180 degrees as the panel is mounted, and portrait (480×800) later.
 - **Tearing**: the framebuffer has no vsync. Not seen as a problem for a control panel; to be watched.
 
 ### What Juggle OS needs (1.1)
@@ -67,8 +68,9 @@ The app says `"juggle": "1.1"` and `"display": true`.
 
 ### The screen
 
-- **Tiles** in a grid, two across in portrait: a **light** (its name and state; a tap toggles it, a long press opens
-  its brightness), a **sensor** (its state and unit), and the **clock** (time and date, at the top).
+- **Tiles** in a grid, as many across as fit (four in landscape, two in portrait): a **light** (its name and state;
+  a tap toggles it, a long press opens its brightness), a **sensor** (its state and unit), and the **clock** (time
+  and date, at the top).
 - **Chosen on the web page**: the Tiles tab lists Home Assistant's lights and sensors (the page asks the app, which
   asks Home Assistant), and the chosen ones go in order. A name of its own per tile, or Home Assistant's.
 - **Built for a finger**: tiles at least 80 px each way, a dark theme, and a press shown at once.
@@ -85,7 +87,8 @@ thermostats), talking to the Earthstorm lights directly, and `wss://`.
 
 ### 1. Check the screen on the Pi
 
-Done (2026-11-01): Pillow and the framebuffer as above, in portrait, with touch; pygame ruled out by its size.
+Done (2026-11-01): Pillow and the framebuffer as above, in portrait and in landscape, with touch; pygame ruled out
+by its size.
 
 ### 2. Juggle OS 1.1: the display for apps
 
