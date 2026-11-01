@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HA Control Panel</title>
+<!-- A waving hand's palm: a rounded square with a wave mark -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='6' fill='%233DDC84'/%3E%3Cpath d='M9 18c2-6 5-6 7 0s5 6 7 0' fill='none' stroke='%2322242f' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/base.css">
+<style>
+.greeting{font-size:22px;font-weight:700;color:var(--text);text-align:center;margin:8px 0 16px;overflow-wrap:anywhere}
+.facts{display:grid;grid-template-columns:minmax(96px,max-content) 1fr;gap:6px 16px;font-size:13px;margin-bottom:8px}
+.facts dt{color:var(--muted)}
+.facts dd{color:var(--text);overflow-wrap:anywhere}
+/* The Pi and its OS side by side; stacked on a phone */
+.status{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px 32px}
+.buttons{margin-bottom:8px}
+/* With MQTT off there's nothing else to set */
+form:has(#mqtt_enabled:not(:checked)) .mqtt-more{display:none}
+form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
+</style>
+</head>
+<body>
+<div class="card">
+<header>
+  <h1 id="name">HA Control Panel</h1>
+  <span class="badge" id="state">Loading&hellip;</span>
+  <div class="health" id="health"></div>
+</header>
+<div class="alert" id="alert" role="alert" hidden></div>
+<noscript><p class="noscript">This page needs JavaScript. Turn it on for this site, then reload.</p></noscript>
+
+<input type="radio" name="t" id="th" data-pane="ph" aria-label="Hello tab" checked>
+<input type="radio" name="t" id="td" data-pane="pd" aria-label="Device tab">
+<input type="radio" name="t" id="tm" data-pane="pm" aria-label="MQTT tab">
+<nav>
+  <label for="th">Hello</label>
+  <label for="td">Device</label>
+  <label for="tm">MQTT</label>
+</nav>
+
+<!-- HELLO PANEL: the app's own -->
+<div class="pane" id="ph">
+  <p class="greeting" id="greeting">&hellip;</p>
+  <form class="settings">
+    <div class="frow">
+      <div class="field"><label for="greeting_text">Greeting</label>
+        <input type="text" required name="hello.greeting" id="greeting_text" maxlength="64" aria-describedby="greeting_help">
+      </div>
+    </div>
+    <p class="note" id="greeting_help">Kept through deploys and OS updates. MQTT and Home Assistant can change it too.</p>
+    <button type="submit" class="btn-full save" disabled>Save</button>
+    <p class="msg" role="status" aria-live="polite"></p>
+  </form>
+
+  <div class="status">
+  <div>
+  <div class="sec">The Pi</div>
+  <dl class="facts">
+    <dt>Up for</dt><dd id="s_uptime">&mdash;</dd>
+    <dt>Temperature</dt><dd id="s_temperature">&mdash;</dd>
+    <dt>Free memory</dt><dd id="s_mem">&mdash;</dd>
+    <dt>Load</dt><dd id="s_load">&mdash;</dd>
+    <dt>Time</dt><dd id="s_time">&mdash;</dd>
+  </dl>
+  </div>
+  <div>
+  <div class="sec">Software</div>
+  <dl class="facts">
+    <dt>Hello</dt><dd id="s_version">&mdash;</dd>
+    <dt>Running for</dt><dd id="s_app_uptime">&mdash;</dd>
+    <dt>Juggle OS</dt><dd id="s_os">&mdash;</dd>
+    <dt>MQTT</dt><dd id="s_mqtt">&mdash;</dd>
+  </dl>
+  </div>
+  </div>
+</div>
+
+<!-- DEVICE AND MQTT PANELS: App Base's (base.js), as on every Juggle app -->
+<div class="pane" id="pd" data-base-pane="device"></div>
+<div class="pane" id="pm" data-base-pane="mqtt">
+  <template data-slot="mqtt-does">read and change the greeting</template>
+  <template data-slot="ha-what">Hello</template>
+  <template data-slot="ha-adds">Home Assistant adds the greeting automatically (MQTT discovery), as a text box.</template>
+</div>
+
+<footer id="footer"></footer>
+</div>
+<script src="/base.js"></script>
+<script>
+var el = Base.el;
+
+Base.onInfo(function (i) {
+  el('state').textContent = 'Running';
+  el('greeting').textContent = i.greeting;
+  el('s_uptime').textContent = Base.duration(i.uptime_s);
+  el('s_temperature').textContent = i.temperature_c != null ? i.temperature_c + ' °C' : '—';
+  el('s_mem').textContent = i.mem_free != null ? Math.round(i.mem_free / 1048576) + ' MiB' : '—';
+  el('s_load').textContent = i.load != null ? i.load : '—';
+  el('s_time').textContent = i.time ? i.time.replace('T', ' ') + (i.time_zone ? ' (' + i.time_zone + ')' : '') : '—';
+  el('s_version').textContent = i.version;
+  el('s_app_uptime').textContent = Base.duration(i.app_uptime_s);
+  el('s_os').textContent = i.os && i.os.version ? i.os.version + (i.os.slot ? ', slot ' + i.os.slot : '') : 'Not on a Pi';
+  el('s_mqtt').textContent = !i.mqtt.enabled ? 'Off' : i.mqtt.connected ? 'Connected' : 'Not connected';
+  showTopics();
+});
+
+// The topics under the topic base, as they'll be once saved
+function showTopics() {
+  var i = Base.info(), p = el('topic_preview'), base = el('topic_base').value.trim();
+  p.textContent = '';
+  if (!base || !i) return;
+  base = base.split('{name}').join(i.name);
+  [['State', '/state'], ['Commands', '/set'], ['Online status', '/status']].forEach(function (x) {
+    p.appendChild(Base.mk('div', { text: x[0] + ': ' }, [Base.mk('code', { text: base + x[1] })]));
+  });
+}
+el('topic_base').addEventListener('input', showTopics);
+
+Base.start();
+</script>
+</body>
+</html>
