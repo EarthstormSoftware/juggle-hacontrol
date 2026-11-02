@@ -89,7 +89,9 @@ The app says `"juggle": "1.1"` and `"display": true`.
   Home Assistant), filtered by what's typed.
 - **Built for a finger**: large tiles, a dark theme, and a press shown at once.
 - **The screen itself**: dark (the backlight off) after so many minutes untouched, 5 by default (0 for never), the
-  first touch only waking it; and its brightness. Both on the Screen tab. Dimmer at night could come later.
+  first touch only waking it; and its brightness, a slider that applies when let go, on a curve (gamma 2.2) so
+  that half looks half as bright (the backlight's steps are linear, which looked uneven: asked for 2026-11-02).
+  Both on the Screen tab. Dimmer at night could come later.
 - **On a PC**, the screen opens in a window (Tkinter, from Python's standard library), with the mouse as the finger,
   so most of the work is done without a Pi.
 
@@ -108,7 +110,8 @@ by its size.
 ### 2. Juggle OS 1.1: the display for apps
 
 In the juggle-os repository (with the display's rotation, on its `v1.1` branch): `"display": true`, Pillow in the
-image, the backlight for the app, each checked by `checks.sh` on the Pi.
+image, the backlight for the app, each checked by `checks.sh` on the Pi. Done on the branch (815d7cf), not yet
+released: Juggle OS 1.1 waits for whatever else joins it.
 
 ### 3. The app's screen
 
