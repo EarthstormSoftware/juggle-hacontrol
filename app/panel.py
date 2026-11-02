@@ -1,12 +1,16 @@
 """What the screen shows: a bar along the top (the date and time, and what's wrong when something is), and the
-tiles filling the rest, laid out to be as large as they can (more columns on a wide screen, more rows on a tall one).
+tiles in a grid of cells below it (4 across and 3 down in landscape). Each tile has a size in cells (2x1: two across,
+one down), or 'auto': one cell, or two across when its value wouldn't fit in one. The tiles go across then down, each
+in the first place it fits (so a small tile can fill a gap a larger one left); one that fits nowhere is left off, and
+the bar says so.
 
 The tiles are in pages, each with a name: with more than one, the bar has a tab for each in place of the date, and
 a page is chosen by tapping its tab or by swiping across the screen.
 
 Each tile is a Home Assistant entity, chosen on the page: a light or switch (a tap toggles it; a light's long press
-opens its brightness), or a sensor (its state and unit; a time as how long ago). A tile's name wraps onto a second
-line, and its text shrinks to fit. A touch shows at once on the tile it's on, and a tap (lifted on the same tile)
+opens its brightness), or a sensor (its state and unit; a time as how long ago). A tile's name is in a band across
+its top, wrapping onto a second line and shrinking to fit; its value is sized to the tile, a sensor's onto more
+lines when it's long. A touch shows at once on the tile it's on, and a tap (lifted on the same tile)
 acts. Only what changed is drawn again: a tile, or the bar when the minute changes. Home Assistant answers a tap with
 the entity's new state, which redraws the tile.
 
@@ -29,6 +33,9 @@ MUTED = (150, 155, 170)
 FAINT = (90, 95, 110)
 TILE = (44, 48, 60)
 TILE_ON = (250, 190, 70)
+# The band with the tile's name
+BAND = (64, 70, 88)
+BAND_ON = (214, 156, 44)
 TEXT_ON = (24, 22, 18)
 WARNING = (240, 150, 90)
 # How much lighter a tile is while it's touched
@@ -40,21 +47,27 @@ TAB_PADDING = 14
 # How far a finger moves across to change the page, and how far before it's a swipe rather than a press
 SWIPE = 100
 SWIPE_START = 30
-PADDING = 16
-RADIUS = 18
-# A tile is at most as tall as it's wide, and the layout looks for tiles about this much wider than tall
-TALLEST = 1.0
-SHAPE = 1.5
-# Text sizes: the most and least a tile's name and value may be
-NAME_SIZES = (30, 16)
-VALUE_SIZES = (64, 18)
+PADDING = 12
+BAND_PADDING = 7
+RADIUS = 16
+# About how large a cell is: the grid has as many as come closest to it
+CELL = (190, 136)
+# A tile's size in cells, across x down
+SIZES = ('auto', '1x1', '2x1', '3x1', '4x1', '1x2', '2x2')
+# Text sizes: the most and least a tile's name and value may be, an on or off's most, and the least an auto tile's
+# value may be in one cell before it's two
+NAME_SIZES = (20, 14)
+VALUE_SIZES = (48, 16)
+STATE_SIZE = 24
+AUTO_LEAST = 22
+LINE_GAP = 4
 # How long a press is held to open a light's brightness
 LONG_PRESS = 0.6
 SLIDER_HEIGHT = 96
 # The entities a tile can be, and which of them toggle
 DOMAINS = ('light', 'switch', 'sensor', 'binary_sensor')
 TOGGLES = ('light', 'switch')
-MOST_TILES = 8
+MOST_TILES = 12
 MOST_PAGES = 6
 
 
@@ -91,13 +104,16 @@ def ago(text, now):
 
 
 class Tile:
-    """A Home Assistant entity on the screen. name: the page's own for it, or None for Home Assistant's."""
+    """A Home Assistant entity on the screen. name: the page's own for it, or None for Home Assistant's; size: one of
+    SIZES."""
 
-    def __init__(self, entity_id, name=None):
+    def __init__(self, entity_id, name=None, size='auto'):
         self.entity_id = entity_id
         self.domain = entity_id.split('.', 1)[0]
         self.name = name
-        self.box = None
+        self.size = size if size in SIZES else 'auto'
+        self.span = (1, 1)  # the cells it has, across and down
+        self.box = None  # None when it doesn't fit
 
     def look(self, state, now=None):
         """(title, what it shows, whether it's on, whether Home Assistant has it) for its state ({"state",
@@ -131,20 +147,23 @@ class Tile:
     def shows_time(self, state):
         return ((state or {}).get('attributes') or {}).get('device_class') == 'timestamp'
 
+    def says_more(self):
+        """Whether its value can be long (a sensor's), not only on or off."""
+        return not (self.toggles() or self.domain == 'binary_sensor')
 
-def grid(count, width, height):
-    """(columns, rows) for count tiles in width x height: the tiles as large as they can be at about SHAPE wide to
-    tall."""
-    count = max(count, 1)
-    best, size = (1, count), -1
-    for columns in range(1, count + 1):
-        rows = math.ceil(count / columns)
-        tile_width = (width - (columns - 1) * GAP) / columns
-        tile_height = (height - (rows - 1) * GAP) / rows
-        fits = min(tile_width / SHAPE, tile_height)
-        if fits > size:
-            best, size = (columns, rows), fits
-    return best
+
+def cells(width, height):
+    """(columns, rows) of the grid in width x height: as many cells as come closest to CELL."""
+    return (max(1, round((width + GAP) / (CELL[0] + GAP))), max(1, round((height + GAP) / (CELL[1] + GAP))))
+
+
+def place(free, across, down):
+    """The first (column, row) where a tile across x down fits in free (rows of whether each cell is), or None."""
+    for row in range(len(free) - down + 1):
+        for column in range(len(free[0]) - across + 1):
+            if all(free[r][c] for r in range(row, row + down) for c in range(column, column + across)):
+                return column, row
+    return None
 
 
 class Panel:
@@ -161,7 +180,10 @@ class Panel:
         self._fonts = {}
         self.pages = []
         self.page = 0
-        self.tiles = []  # the page's
+        self.tiles = []  # the page's that fit on the screen
+        self.left_out = 0  # how many of them don't
+        self.grid = (1, 1)
+        self.cell_width = 0
         self.tabs = []  # each page's tab in the bar: (left, right), with more than one page
         self.start = None  # where the touch went down, for a swipe
         self.swiping = False
@@ -198,7 +220,6 @@ class Panel:
 
     def go_to(self, page):
         self.page = page
-        self.tiles = self.pages[page].tiles
         self.pressed = self.adjusting = None
         self.cancel_hold()
         self.layout()
@@ -206,16 +227,42 @@ class Panel:
             self.show_all()
 
     def layout(self):
-        top, bottom = BAR_HEIGHT + MARGIN, self.height - MARGIN
-        width, height = self.width - 2 * MARGIN, bottom - top
-        columns, rows = grid(len(self.tiles), width, height)
-        tile_width = (width - (columns - 1) * GAP) // columns
-        tile_height = min((height - (rows - 1) * GAP) // rows, int(tile_width * TALLEST))
-        for index, tile in enumerate(self.tiles):
-            row, column = divmod(index, columns)
-            left = MARGIN + column * (tile_width + GAP)
-            y = top + row * (tile_height + GAP)
-            tile.box = (left, y, left + tile_width, y + tile_height)
+        """Each of the page's tiles in the first place in the grid it fits, across then down."""
+        top = BAR_HEIGHT + MARGIN
+        width, height = self.width - 2 * MARGIN, self.height - MARGIN - top
+        columns, rows = self.grid = cells(width, height)
+        cell_width = self.cell_width = (width - (columns - 1) * GAP) / columns
+        cell_height = (height - (rows - 1) * GAP) / rows
+        free = [[True] * columns for _ in range(rows)]
+        tiles = self.pages[self.page].tiles
+        self.tiles = []
+        for tile in tiles:
+            tile.span = self.wanted(tile)
+            spot = place(free, *tile.span)
+            if spot is None:
+                tile.box = None
+                continue
+            (column, row), (across, down) = spot, tile.span
+            for r in range(row, row + down):
+                for c in range(column, column + across):
+                    free[r][c] = False
+            tile.box = (MARGIN + round(column * (cell_width + GAP)), top + round(row * (cell_height + GAP)),
+                        MARGIN + round((column + across) * (cell_width + GAP) - GAP),
+                        top + round((row + down) * (cell_height + GAP) - GAP))
+            self.tiles.append(tile)
+        self.left_out = len(tiles) - len(self.tiles)
+
+    def wanted(self, tile):
+        """The cells a tile wants (across, down), no more than the grid has: its size, or for 'auto' one cell, or two
+        across when its value wouldn't fit in one at AUTO_LEAST in two lines."""
+        if tile.size != 'auto':
+            across, down = (int(n) for n in tile.size.split('x'))
+        else:
+            _, value, _, available = tile.look(self.state(tile.entity_id))
+            fits = not (tile.says_more() and available) or self.wrapped(
+                value, self.cell_width - 2 * PADDING, 2, (AUTO_LEAST, AUTO_LEAST), shorten=False)
+            across, down = (1, 1) if fits else (2, 1)
+        return min(across, self.grid[0]), min(down, self.grid[1])
 
     def tile_at(self, x, y):
         return next((tile for tile in self.tiles
@@ -223,20 +270,36 @@ class Panel:
 
     # Text that fits
 
-    def wrapped(self, text, width, lines, sizes):
+    def wrapped(self, text, width, lines, sizes, shorten=True):
         """(font, lines of text) for text in width: the largest size from sizes[0] down to sizes[1] that fits in that
         many lines with every word whole; failing that, with words broken where they join (CounterTopLeft at its
         capitals, sonoff_snzb at the underscore), then anywhere; failing that, the smallest with the last line
-        shortened."""
+        shortened (or None, without shorten)."""
         for breaking in (None, 'joins', 'anywhere'):
             for size in range(sizes[0], sizes[1] - 1, -2):
                 font = self.font(size)
                 split = self.split(text, font, width, breaking)
                 if split is not None and len(split) <= lines:
                     return font, split
+        if not shorten:
+            return None
         font = self.font(sizes[1])
         split = self.split(text, font, width, 'anywhere')
         return font, split[:lines - 1] + [self.shortened(' '.join(split[lines - 1:]), font, width)]
+
+    def fitted(self, text, width, height, sizes, most_lines):
+        """(font, lines) for text in width x height, in up to most_lines lines: whichever number of lines lets it be
+        largest (sizes as wrapped has them), or the smallest with the last line shortened."""
+        best = None
+        for lines in range(1, most_lines + 1):
+            largest = min(sizes[0], (height - (lines - 1) * LINE_GAP) // lines)
+            if largest < sizes[1]:
+                break
+            found = self.wrapped(text, width, lines, (largest, sizes[1]), shorten=False)
+            if found and (best is None or found[0].size > best[0].size):
+                best = found
+        room = max(1, min(most_lines, (height + LINE_GAP) // (sizes[1] + LINE_GAP)))
+        return best or self.wrapped(text, width, room, (sizes[1], sizes[1]))
 
     def split(self, text, font, width, breaking='anywhere'):
         """text in lines no wider than width, at spaces. A word too long for a line on its own is broken as breaking
@@ -307,9 +370,9 @@ class Panel:
                 self.tabs.append((left, left + width))
                 left += width + 4
             left += MARGIN
-            text, colour = self.status, WARNING  # the date makes way for the tabs
-        elif self.status:
-            text, colour = self.status, WARNING
+            text, colour = self.warning(), WARNING  # the date makes way for the tabs
+        elif self.warning():
+            text, colour = self.warning(), WARNING
         else:
             text, colour = time.strftime('%A %d %B', now), MUTED
         if text and right - left > 40:
@@ -317,37 +380,46 @@ class Panel:
                            fill=colour, anchor='lm')
         return box
 
+    def warning(self):
+        """What's wrong, for the bar: Home Assistant's, or tiles that don't fit; or None."""
+        if self.status or not self.left_out:
+            return self.status
+        return "1 tile doesn't fit" if self.left_out == 1 else "{} tiles don't fit".format(self.left_out)
+
     def draw_tile(self, tile):
         left, top, right, bottom = tile.box
         state = self.state(tile.entity_id)
         title, value, on, available = tile.look(state)
         if on:
-            fill, text, muted = TILE_ON, TEXT_ON, TEXT_ON
+            fill, band, text, muted = TILE_ON, BAND_ON, TEXT_ON, TEXT_ON
         else:
-            fill, text, muted = TILE, TEXT if available else MUTED, MUTED if available else FAINT
+            fill, band, text, muted = TILE, BAND, TEXT if available else MUTED, TEXT if available else FAINT
         if tile is self.pressed:
-            fill = tuple(min(255, c + PRESSED) for c in fill)
+            fill, band = (tuple(min(255, c + PRESSED) for c in colour) for colour in (fill, band))
         inside = right - left - 2 * PADDING
-        height = bottom - top
         self.draw.rectangle(tile.box, fill=BACKGROUND)
         self.draw.rounded_rectangle((left, top, right - 1, bottom - 1), radius=RADIUS, fill=fill)
 
-        # The name: two lines at most, as large as fits in about the top half
-        name_most = max(NAME_SIZES[1], min(NAME_SIZES[0], height // 6))
-        font, lines = self.wrapped(title, inside, 2, (name_most, NAME_SIZES[1]))
-        y = top + PADDING
+        # The name, in a band across the top: one line if it fits, or two
+        font, lines = self.wrapped(title, inside, 2, NAME_SIZES)
+        below = top + 2 * BAND_PADDING + len(lines) * font.size + (len(lines) - 1) * 3
+        self.draw.rounded_rectangle((left, top, right - 1, below), radius=RADIUS, fill=band,
+                                    corners=(True, True, False, False))
+        y = top + BAND_PADDING
         for line in lines:
             self.draw.text((left + PADDING, y), line, font=font, fill=text)
-            y += font.size + 4
+            y += font.size + 3
 
-        # The value: one line, larger for a sensor (it's what matters), as large as fits in what's left
-        room = bottom - PADDING - y - 4
-        if tile.toggles() or tile.domain == 'binary_sensor' or not available:
-            most = min(28, max(VALUE_SIZES[1], room))
+        # The value, sized to what's below: one line for on or off, a sensor's onto more when it's long
+        height = bottom - below - 2 * PADDING
+        if tile.says_more() and available:
+            font, lines = self.fitted(value, inside, height, VALUE_SIZES, 3)
         else:
-            most = min(VALUE_SIZES[0], max(VALUE_SIZES[1], room))
-        font, lines = self.wrapped(value, inside, 1, (most, VALUE_SIZES[1]))
-        self.draw.text((left + PADDING, bottom - PADDING), lines[0], font=font, fill=muted, anchor='ls')
+            font, lines = self.fitted(value, inside, height, (STATE_SIZE, VALUE_SIZES[1]), 1)
+        y = bottom - PADDING - (len(lines) - 1) * (font.size + LINE_GAP)
+        for line in lines:
+            self.draw.text((left + PADDING, y), line, font=font, fill=muted, anchor='ls')
+            y += font.size + LINE_GAP
         return tile.box
 
     def draw_hint(self):
@@ -403,8 +475,14 @@ class Panel:
                 if not self.adjusting.dims(self.state(self.adjusting.entity_id)):
                     self.close_brightness()
             return
-        for tile in self.tiles:
-            if entity_ids is None or tile.entity_id in entity_ids:
+        shown = [tile for tile in self.pages[self.page].tiles if entity_ids is None or tile.entity_id in entity_ids]
+        if any(tile.size == 'auto' and self.wanted(tile) != tile.span for tile in shown):
+            # An auto tile's value is now longer or shorter than one cell has room for
+            self.layout()
+            self.show_all()
+            return
+        for tile in shown:
+            if tile.box:
                 self.screen.show(self.image, self.draw_tile(tile))
 
     # Touches

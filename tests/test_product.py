@@ -48,14 +48,15 @@ def test_addresses_it_cant_have_are_refused(device, address):
 
 
 def test_the_pages_are_kept_and_every_pages_entities_watched_once(device):
-    pages = [{'name': 'Kitchen', 'tiles': [{'entity_id': 'light.kitchen', 'name': 'Worktop'},
+    pages = [{'name': 'Kitchen', 'tiles': [{'entity_id': 'light.kitchen', 'name': 'Worktop', 'size': '2x1'},
                                            {'entity_id': 'sensor.hall'}]},
              {'name': 'Hall', 'tiles': [{'entity_id': 'sensor.hall'}, {'entity_id': 'switch.fan'}]}]
     assert device.change({'screen': {'pages': pages}}) is None
     assert product.connection(device).watched == ['light.kitchen', 'sensor.hall', 'switch.fan']
     chosen = product.chosen_pages(device)
     assert [page.name for page in chosen] == ['Kitchen', 'Hall']
-    assert [(t.entity_id, t.name) for t in chosen[0].tiles] == [('light.kitchen', 'Worktop'), ('sensor.hall', None)]
+    assert [(t.entity_id, t.name, t.size) for t in chosen[0].tiles] == [('light.kitchen', 'Worktop', '2x1'),
+                                                                        ('sensor.hall', None, 'auto')]
 
 
 def page(tiles, name='Page'):
@@ -66,7 +67,8 @@ def page(tiles, name='Page'):
     'light.kitchen', page('light.kitchen'), page([{'entity_id': 'automation.night'}]),
     page([{'entity_id': 'light.kitchen'}] * 2), page([{'entity_id': 'light.Kitchen'}]),
     page([{'entity_id': 'light.kitchen', 'name': 'x' * 33}]), page([{'entity_id': 'light.kitchen', 'colour': 'red'}]),
-    page([{'entity_id': 'sensor.s{}'.format(n)} for n in range(9)]), page([], name='x' * 21),
+    page([{'entity_id': 'sensor.s{}'.format(n)} for n in range(13)]), page([], name='x' * 21),
+    page([{'entity_id': 'light.kitchen', 'size': '5x1'}]),
     [{'tiles': []}], page([]) * 7])
 def test_pages_that_cant_be_are_refused(device, pages):
     assert device.change({'screen': {'pages': pages}}) is not None

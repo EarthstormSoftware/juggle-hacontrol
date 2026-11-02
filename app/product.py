@@ -14,7 +14,7 @@ from pathlib import Path
 from base.log import Log
 from base.settings import Setting, is_int, is_text
 from ha import HomeAssistant, check_address
-from panel import DOMAINS, MOST_PAGES, MOST_TILES, Page, Tile
+from panel import DOMAINS, MOST_PAGES, MOST_TILES, SIZES, Page, Tile
 
 NAME = 'HA Control Panel'
 VERSION = json.loads((Path(__file__).parent / 'app.json').read_text(encoding='utf-8'))['version']
@@ -27,13 +27,14 @@ FAILED_SECONDS = 5
 
 
 def check_tiles(value):
-    """A Setting check for the tiles: [{"entity_id", "name"}], name optional (Home Assistant's otherwise)."""
+    """A Setting check for the tiles: [{"entity_id", "name", "size"}], name optional (Home Assistant's otherwise), size
+    one of SIZES ('auto' if not given)."""
     if not isinstance(value, list) or len(value) > MOST_TILES:
         return 'must be a list of up to {} tiles'.format(MOST_TILES)
     seen = set()
     for tile in value:
-        if not isinstance(tile, dict) or set(tile) - {'entity_id', 'name'}:
-            return 'must be tiles of entity_id and name'
+        if not isinstance(tile, dict) or set(tile) - {'entity_id', 'name', 'size'}:
+            return 'must be tiles of entity_id, name and size'
         entity_id, name = tile.get('entity_id'), tile.get('name', '')
         found = ENTITY_ID.fullmatch(entity_id) if isinstance(entity_id, str) else None
         if not found or found.group(1) not in DOMAINS:
@@ -43,6 +44,8 @@ def check_tiles(value):
         seen.add(entity_id)
         if not isinstance(name, str) or len(name) > LONGEST_NAME:
             return 'has a name longer than {} characters'.format(LONGEST_NAME)
+        if tile.get('size', 'auto') not in SIZES:
+            return 'has a size that isn\'t one of {}'.format(', '.join(SIZES))
     return None
 
 
@@ -92,7 +95,8 @@ def configure(device):
 
 
 def chosen_pages(device):
-    return [Page(page['name'], [Tile(tile['entity_id'], tile.get('name') or None) for tile in page['tiles']])
+    return [Page(page['name'], [Tile(tile['entity_id'], tile.get('name') or None, tile.get('size', 'auto'))
+                                for tile in page['tiles']])
             for page in device.settings.get('screen', 'pages')]
 
 
@@ -117,7 +121,10 @@ def show_pages(device):
 
 def info(device):
     ha = connection(device)
-    return {'home_assistant': {'status': ha.status, 'connected': ha.connected, 'version': ha.version}}
+    panel = getattr(device, 'panel', None)
+    # The screen's grid, for the page to say how many cells a page's tiles take
+    return {'home_assistant': {'status': ha.status, 'connected': ha.connected, 'version': ha.version},
+            'screen': {'columns': panel.grid[0], 'rows': panel.grid[1]} if panel else None}
 
 
 def state(device):

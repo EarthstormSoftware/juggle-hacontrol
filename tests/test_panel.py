@@ -67,24 +67,78 @@ def middle(tile):
     return (tile.box[0] + tile.box[2]) // 2, (tile.box[1] + tile.box[3]) // 2
 
 
-@pytest.mark.parametrize('count, size, expected', [
-    (5, (776, 412), (3, 2)), (8, (776, 412), (3, 3)), (2, (776, 412), (2, 1)), (1, (776, 412), (1, 1)),
-    (8, (456, 732), (2, 4)), (3, (456, 732), (1, 3))])
-def test_the_grid_makes_the_tiles_as_large_as_they_can_be(count, size, expected):
-    assert panel.grid(count, *size) == expected
+@pytest.mark.parametrize('size, expected', [((800, 480), (4, 3)), ((480, 800), (2, 5))])
+def test_the_grid_has_cells_of_about_the_same_size_on_either_screen(size, expected):
+    _, p, _, _ = make(size)
+    assert p.grid == expected
+
+
+def tiles(*sizes):
+    return [panel.Tile('sensor.s{}'.format(n), size=size) for n, size in enumerate(sizes)]
 
 
 @pytest.mark.parametrize('size', [(800, 480), (480, 800)])
-@pytest.mark.parametrize('count', [1, 2, 5, 8])
-def test_the_tiles_fill_the_screen_below_the_bar_without_overlapping(size, count):
-    _, p, _, _ = make(size, ['sensor.s{}'.format(n) for n in range(count)])
+@pytest.mark.parametrize('sizes', [['1x1'], ['1x1'] * 12, ['2x2', '1x2', '1x1', '4x1'], ['3x1', '2x1', '1x1', '1x1']])
+def test_the_tiles_are_below_the_bar_without_overlapping(size, sizes):
+    _, p, _, _ = make(size)
+    p.set_tiles(tiles(*sizes))
     boxes = [tile.box for tile in p.tiles]
     for left, top, right, bottom in boxes:
         assert 0 <= left < right <= size[0] and panel.BAR_HEIGHT <= top < bottom <= size[1]
-        assert bottom - top <= right - left  # never taller than wide
     for a in boxes:
         for b in boxes:
             assert a is b or a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1]
+
+
+def test_a_tile_takes_the_cells_its_size_says_and_a_small_one_fills_a_gap():
+    _, p, _, _ = make()
+    p.set_tiles(tiles('2x2', '3x1', '1x1', '1x2'))
+    big, wide, small, tall = p.tiles
+    one = p.tiles[2].box
+    width, height = one[2] - one[0], one[3] - one[1]
+    assert big.box[2] - big.box[0] == 2 * width + panel.GAP and big.box[3] - big.box[1] == 2 * height + panel.GAP
+    assert wide.box[1] > big.box[3]  # no room for three across beside it: below
+    assert small.box[0] == big.box[2] + panel.GAP and small.box[1] == big.box[1]  # beside it
+    assert tall.box[3] - tall.box[1] == 2 * height + panel.GAP
+
+
+def test_a_size_larger_than_the_grid_is_as_large_as_it_has():
+    _, p, _, _ = make((480, 800))
+    p.set_tiles(tiles('4x1'))
+    assert p.tiles[0].span == (2, 1)
+
+
+def test_tiles_that_dont_fit_are_left_off_and_the_bar_says_so():
+    screen, p, _, _ = make()
+    p.set_tiles(tiles('2x2', '2x2', '4x1', '2x2', '1x1'))
+    assert len(p.tiles) == 3 and p.left_out == 2 and p.warning() == "2 tiles don't fit"
+    p.show_all()
+    p.set_status('Home Assistant: not connected')
+    assert p.warning() == 'Home Assistant: not connected'
+
+
+def test_an_auto_tile_is_one_cell_or_two_across_for_a_long_value():
+    states = dict(STATES)
+    states['sensor.words'] = {'state': 'Detected in the kitchen by the counter', 'attributes': {}}
+    _, p, _, _ = make(entity_ids=('sensor.hall', 'sensor.words', 'switch.fan'))
+    p.state = states.get
+    p.set_tiles([panel.Tile('sensor.hall'), panel.Tile('sensor.words'), panel.Tile('switch.fan')])
+    assert [tile.span for tile in p.tiles] == [(1, 1), (2, 1), (1, 1)]
+
+    p.show_all()
+    states['sensor.words'] = {'state': 'Clear', 'attributes': {}}
+    p.changed(['sensor.words'])  # shorter now: the screen is laid out again
+    assert p.tiles[1].span == (1, 1) and p.screen.shown[-1] is None
+
+
+@pytest.mark.parametrize('text', ['19.5 °C', 'Detected in the kitchen by the counter top', 'On · 50%'])
+@pytest.mark.parametrize('size', [(150, 60), (360, 60), (150, 200)])
+def test_a_value_fits_in_its_room(text, size):
+    _, p, _, _ = make()
+    font, lines = p.fitted(text, size[0], size[1], panel.VALUE_SIZES, 3)
+    assert all(p.draw.textlength(line, font=font) <= size[0] for line in lines)
+    assert len(lines) * font.size + (len(lines) - 1) * panel.LINE_GAP <= size[1] or font.size == panel.VALUE_SIZES[1]
+    assert font.size <= panel.VALUE_SIZES[0]
 
 
 @pytest.mark.parametrize('entity_id, expected', [

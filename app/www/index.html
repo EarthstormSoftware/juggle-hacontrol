@@ -20,6 +20,12 @@
 .row .id{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .acts{display:flex;gap:6px;flex-shrink:0}
 .row input{width:100%}
+/* A tile's name and its size, side by side */
+.row .pair{display:flex;gap:6px}
+.row .pair input{flex:1;min-width:0}
+.row .pair select{flex:0 0 auto;width:auto}
+#brightness{width:100%;accent-color:var(--accent)}
+#brightness_shown{color:var(--muted)}
 .row .reset{padding:6px 10px}
 .reset.inline{display:inline-flex;padding:3px 8px;font-size:12px}
 #entities{max-height:420px;overflow-y:auto}
@@ -69,7 +75,8 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
   <div class="sec">Its Tiles</div>
   <p class="note" id="tiles_empty" hidden>None yet: add them from Home Assistant's below.</p>
   <div class="rows" id="tiles_list"></div>
-  <p class="note">In this order, across then down. A name here replaces Home Assistant's on the screen. Tap a light or switch to switch it; hold a light to set its brightness. With more than one page, the screen's top bar has a tab for each, and a swipe across changes the page.</p>
+  <p class="note" id="cells"></p>
+  <p class="note">Each tile has a name on the screen (Home Assistant's unless one is typed) and a size in the screen's cells, across × down. Auto is one cell, or two across when its value is too long for one. They go across then down, each in the first place it fits. Tap a light or switch to switch it; hold a light to set its brightness. With more than one page, the screen's top bar has a tab for each, and a swipe across changes the page.</p>
   <button type="button" class="btn-full" id="tiles_save" disabled>Save</button>
   <p class="msg" id="tiles_msg" role="status" aria-live="polite"></p>
 
@@ -88,11 +95,12 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
       <div class="field"><label for="timeout_minutes">Dark After (minutes untouched, 0 for never)</label>
         <input type="number" required name="screen.timeout_minutes" id="timeout_minutes" min="0" max="240" step="1">
       </div>
-      <div class="field"><label for="brightness">Brightness (%)</label>
-        <input type="number" required name="screen.brightness" id="brightness" min="5" max="100" step="5">
+      <div class="field"><label for="brightness">Brightness <span id="brightness_shown"></span></label>
+        <input type="range" id="brightness" min="5" max="100" step="5">
       </div>
     </div>
-    <p class="note">When it's dark, a touch only wakes it.</p>
+    <p class="note">When it's dark, a touch only wakes it. The brightness changes as soon as the slider is let go.</p>
+    <p class="msg" id="brightness_msg" role="status" aria-live="polite"></p>
     <button type="submit" class="btn-full save" disabled>Save</button>
     <p class="msg" role="status" aria-live="polite"></p>
   </form>
@@ -169,7 +177,11 @@ Base.onInfo(function (i) {
 // The pages and their tiles (screen.pages): Home Assistant's entities, in order, each with a name of its own if
 // wanted. They're edited here, one page at a time, and saved together; the tiles to add come from Home Assistant,
 // filtered by what's typed.
-var MOST_PAGES = 6, MOST_TILES = 8, pages = null, current = 0, entities = [], names = {};
+var MOST_PAGES = 6, MOST_TILES = 12, pages = null, current = 0, entities = [], names = {};
+// A tile's size in the screen's cells (across x down), and the grid (the screen's, once it says; landscape's till then)
+var SIZES = [['auto', 'Auto'], ['1x1', '1×1 small'], ['2x1', '2×1 wide'], ['3x1', '3×1 wider'], ['4x1', '4×1 full width'],
+  ['1x2', '1×2 tall'], ['2x2', '2×2 large']];
+var grid = { columns: 4, rows: 3 };
 
 function page() { return pages[current]; }
 
@@ -199,6 +211,10 @@ function showTiles() {
     var name = Base.mk('input', { type: 'text', maxLength: 32, placeholder: names[t.entity_id] || t.entity_id,
       value: t.name || '', 'aria-label': 'Name on the screen for ' + t.entity_id });
     name.addEventListener('input', function () { t.name = name.value; changed(); });
+    var size = Base.mk('select', { 'aria-label': 'Size on the screen for ' + t.entity_id },
+      SIZES.map(function (s) { return Base.mk('option', { value: s[0], text: s[1] }); }));
+    size.value = t.size;
+    size.addEventListener('change', function () { t.size = size.value; showCells(); changed(); });
     var move = function (by) { return function () { tiles.splice(n + by, 0, tiles.splice(n, 1)[0]); showTiles(); changed(); }; };
     var up = Base.mk('button', { type: 'button', className: 'reset', text: '↑', title: 'Earlier', disabled: n === 0 });
     var down = Base.mk('button', { type: 'button', className: 'reset', text: '↓', title: 'Later', disabled: n === tiles.length - 1 });
@@ -207,9 +223,22 @@ function showTiles() {
     down.addEventListener('click', move(1));
     remove.addEventListener('click', function () { tiles.splice(n, 1); showTiles(); showEntities(); changed(); });
     list.appendChild(Base.mk('div', { className: 'row' }, [
-      Base.mk('div', { className: 'what' }, [name, Base.mk('span', { className: 'id', text: t.entity_id })]),
+      Base.mk('div', { className: 'what' }, [
+        Base.mk('div', { className: 'pair' }, [name, size]), Base.mk('span', { className: 'id', text: t.entity_id })]),
       Base.mk('div', { className: 'acts' }, [up, down, remove])]));
   });
+  showCells();
+}
+
+// How many of the screen's cells the page's tiles take (an auto tile as one, though a long value makes it two)
+function showCells() {
+  var used = 0, all = grid.columns * grid.rows;
+  page().tiles.forEach(function (t) {
+    var s = t.size === 'auto' ? [1, 1] : t.size.split('x').map(Number);
+    used += Math.min(s[0], grid.columns) * Math.min(s[1], grid.rows);
+  });
+  el('cells').textContent = page().tiles.length ? 'These take ' + used + ' of the screen\'s ' + all + ' cells (' +
+    grid.columns + ' across, ' + grid.rows + ' down)' + (used > all ? ': some won\'t fit, and the screen will say so.' : '.') : '';
 }
 
 function showEntities() {
@@ -222,7 +251,7 @@ function showEntities() {
     shown++;
     var add = Base.mk('button', { type: 'button', className: 'reset', text: 'Add', disabled: full });
     add.addEventListener('click', function () {
-      tiles.push({ entity_id: e.entity_id, name: '' });
+      tiles.push({ entity_id: e.entity_id, name: '', size: 'auto' });
       showTiles(); showEntities(); changed();
     });
     list.appendChild(Base.mk('div', { className: 'row' }, [
@@ -248,11 +277,17 @@ function loadEntities() {
   }).catch(function (e) { Base.say('tiles_msg', 'Could not ask Home Assistant: ' + e.message); });
 }
 
-Base.onInfo(function () {
+Base.onInfo(function (i) {
+  if (i.screen && (i.screen.columns !== grid.columns || i.screen.rows !== grid.rows)) {
+    grid = i.screen;
+    if (pages) showCells();
+  }
   var c = Base.config();
   if (pages !== null || !c) return;
   pages = c.screen.pages.map(function (p) {
-    return { name: p.name, tiles: p.tiles.map(function (t) { return { entity_id: t.entity_id, name: t.name || '' }; }) };
+    return { name: p.name, tiles: p.tiles.map(function (t) {
+      return { entity_id: t.entity_id, name: t.name || '', size: t.size || 'auto' };
+    }) };
   });
   if (!pages.length) pages.push({ name: '', tiles: [] });
   showAll();
@@ -270,12 +305,31 @@ el('page_remove').addEventListener('click', function () {
   current = Math.max(0, current - 1);
   showAll(); changed();
 });
+// The brightness: a slider, saved (and so shown on the screen) when it's let go, not with the form's Save
+var brightnessSet = false;
+function showBrightness() { el('brightness_shown').textContent = el('brightness').value + '%'; }
+Base.onInfo(function () {
+  var c = Base.config();
+  if (brightnessSet || !c) return;
+  brightnessSet = true;
+  el('brightness').value = c.screen.brightness;
+  showBrightness();
+});
+el('brightness').addEventListener('input', showBrightness);
+el('brightness').addEventListener('change', function () {
+  Base.api('/api/config', { screen: { brightness: Number(el('brightness').value) } }).then(function () {
+    Base.say('brightness_msg', '', true);
+  }).catch(function (e) { Base.say('brightness_msg', 'Brightness not saved: ' + e.message); });
+});
 el('entity_filter').addEventListener('input', showEntities);
 el('entities_reload').addEventListener('click', loadEntities);
 el('tiles_save').addEventListener('click', function () {
   var saved = pages.map(function (p) {
     return { name: p.name.trim(), tiles: p.tiles.map(function (t) {
-      return t.name.trim() ? { entity_id: t.entity_id, name: t.name.trim() } : { entity_id: t.entity_id };
+      var tile = { entity_id: t.entity_id };
+      if (t.name.trim()) tile.name = t.name.trim();
+      if (t.size !== 'auto') tile.size = t.size;
+      return tile;
     }) };
   });
   Base.say('tiles_msg', 'Saving…', true);

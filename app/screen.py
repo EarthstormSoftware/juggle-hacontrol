@@ -154,6 +154,7 @@ class Backlight:
     """The display's backlight, which Juggle OS lets an app with "display" change: on, off, and how bright."""
     FOLDER = Path('/sys/class/backlight')
     POWER_ON, POWER_OFF = 0, 4  # bl_power: FB_BLANK_UNBLANK, FB_BLANK_POWERDOWN
+    GAMMA = 2.2
 
     def __init__(self, folder):
         self.folder = folder
@@ -179,7 +180,9 @@ class Backlight:
         self._write('bl_power', self.POWER_OFF)
 
     def set_brightness(self, percent):
-        self._write('brightness', max(1, round(self.most * percent / 100)))
+        """percent as it looks: the eye sees the backlight's steps as much larger when it's dim, so the steps follow
+        a curve (GAMMA) and half looks about half as bright."""
+        self._write('brightness', max(1, round(self.most * (percent / 100) ** self.GAMMA)))
 
 
 class PiScreen:

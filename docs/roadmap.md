@@ -72,13 +72,16 @@ The app says `"juggle": "1.1"` and `"display": true`.
 
 - **A bar along the top** (asked for 2026-11-01, in place of a large clock: the tiles matter more): the date and
   time, and what's wrong (Home Assistant not connected, an action that failed) in place of the date.
-- **Tiles** filling the rest, as large as they can be: the grid's columns and rows are chosen for the number of
-  tiles and the screen's shape (five in landscape are three and two), never taller than wide. A **light** or
+- **Tiles** in a grid of cells below the bar (4 across and 3 down in landscape, 2 and 5 in portrait), each a size
+  in cells (asked for 2026-11-02, in place of tiles as large as the screen allowed, whose text grew too large):
+  1×1, 2×1, 3×1, 4×1, 1×2 or 2×2, or **auto**, one cell or two across when its value is too long for one. They go
+  across then down, each in the first place it fits; one that fits nowhere is left off and the bar says so. Its
+  text is sized to the tile, the name in a band across its top. A **light** or
   **switch** (a tap toggles it; a light shows its brightness, and a long press opens a slider for it), a **sensor**
   (its state and unit, large; a timestamp as how long ago), or a **binary sensor** (on or off). A name wraps onto a
   second line and shrinks to fit, keeping words whole if it can, then breaking them where they join (CounterTopLeft
   at its capitals), and only then anywhere.
-- **Pages** (asked for 2026-11-01): up to six, each with a name and up to eight tiles. With more than one, the bar
+- **Pages** (asked for 2026-11-01): up to six, each with a name and up to twelve tiles. With more than one, the bar
   has a tab for each in place of the date, and a swipe across changes the page. Every page's entities are watched,
   so changing the page is at once.
 - **Chosen on the web page**: the Screen tab has the pages, each page's tiles in order (a name of its own per tile,
