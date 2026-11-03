@@ -20,10 +20,12 @@
 .row .id{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row .acts{display:flex;gap:6px;flex-shrink:0}
 .row input{width:100%}
-/* A tile's name and its size, side by side */
-.row .pair{display:flex;gap:6px}
+/* A tile's name, where it's from, and Rename (or, renaming, the box and its buttons); under it, its size and id */
+.row .pair{display:flex;align-items:center;gap:6px}
 .row .pair input{flex:1;min-width:0}
-.row .pair select{flex:0 0 auto;width:auto}
+.row .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .from{font-size:12px;color:var(--muted);white-space:nowrap}
+.row .pair select{flex:0 0 auto;width:auto;padding:4px 8px}
 #brightness{width:100%;accent-color:var(--accent)}
 #brightness_shown{color:var(--muted)}
 .row .reset{padding:6px 10px}
@@ -46,18 +48,20 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
 </header>
 <div class="alert" id="alert" role="alert" hidden></div>
 
-<input type="radio" name="t" id="tt" data-pane="pt" aria-label="Screen tab" checked>
+<input type="radio" name="t" id="tt" data-pane="pt" aria-label="Tiles tab" checked>
+<input type="radio" name="t" id="tx" data-pane="px" aria-label="Display tab">
 <input type="radio" name="t" id="th" data-pane="ph" aria-label="Home Assistant tab">
 <input type="radio" name="t" id="td" data-pane="pd" aria-label="Device tab">
 <input type="radio" name="t" id="tm" data-pane="pm" aria-label="MQTT tab">
 <nav>
-  <label for="tt">Screen</label>
+  <label for="tt">Tiles</label>
+  <label for="tx">Display</label>
   <label for="th">Home Assistant</label>
   <label for="td">Device</label>
   <label for="tm">MQTT</label>
 </nav>
 
-<!-- SCREEN PANEL: what the screen shows -->
+<!-- TILES PANEL: what the screen shows -->
 <div class="pane" id="pt">
   <div class="sec">Pages</div>
   <div class="pages" id="pages"></div>
@@ -76,7 +80,7 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
   <p class="note" id="tiles_empty" hidden>None yet: add them from Home Assistant's below.</p>
   <div class="rows" id="tiles_list"></div>
   <p class="note" id="cells"></p>
-  <p class="note">Each tile has a name on the screen (Home Assistant's unless one is typed) and a size in the screen's cells, across × down. Auto is one cell, or two across when its value is too long for one. They go across then down, each in the first place it fits. Tap a light or switch to switch it; hold a light to set its brightness. With more than one page, the screen's top bar has a tab for each, and a swipe across changes the page.</p>
+  <p class="note">Each tile has a name on the screen (Home Assistant's unless it's renamed) and a size in the screen's cells, across × down. Auto is one cell, or two across when its value is too long for one. They go across then down, each in the first place it fits. Tap a light or switch to switch it; hold a light to set its brightness. With more than one page, the screen's top bar has a tab for each, and a swipe across changes the page.</p>
   <button type="button" class="btn-full" id="tiles_save" disabled>Save</button>
   <p class="msg" id="tiles_msg" role="status" aria-live="polite"></p>
 
@@ -88,7 +92,11 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
   </div>
   <div class="rows" id="entities"></div>
   <p class="note"><span id="entities_note"></span> <button type="button" class="reset inline" id="entities_reload">Ask again</button></p>
+</div>
 
+<!-- DISPLAY PANEL: the screen itself, and App Base's Display section (its rotation) -->
+<div class="pane" id="px">
+  <div data-base-display></div>
   <form class="settings">
     <div class="sec">The Screen</div>
     <div class="frow">
@@ -182,6 +190,7 @@ var MOST_PAGES = 6, MOST_TILES = 12, pages = null, current = 0, entities = [], n
 var SIZES = [['auto', 'Auto'], ['1x1', '1×1 small'], ['2x1', '2×1 wide'], ['3x1', '3×1 wider'], ['4x1', '4×1 full width'],
   ['1x2', '1×2 tall'], ['2x2', '2×2 large']];
 var grid = { columns: 4, rows: 3 };
+var renaming = null;  // the tile whose name is being typed
 
 function page() { return pages[current]; }
 
@@ -207,10 +216,10 @@ function showTiles() {
   var list = el('tiles_list'), tiles = page().tiles;
   list.textContent = '';
   el('tiles_empty').hidden = tiles.length > 0;
+  var typing = null;
   tiles.forEach(function (t, n) {
-    var name = Base.mk('input', { type: 'text', maxLength: 32, placeholder: names[t.entity_id] || t.entity_id,
-      value: t.name || '', 'aria-label': 'Name on the screen for ' + t.entity_id });
-    name.addEventListener('input', function () { t.name = name.value; changed(); });
+    var name = t === renaming ? renameBox(t) : nameShown(t);
+    if (t === renaming) typing = name.firstChild;
     var size = Base.mk('select', { 'aria-label': 'Size on the screen for ' + t.entity_id },
       SIZES.map(function (s) { return Base.mk('option', { value: s[0], text: s[1] }); }));
     size.value = t.size;
@@ -223,11 +232,43 @@ function showTiles() {
     down.addEventListener('click', move(1));
     remove.addEventListener('click', function () { tiles.splice(n, 1); showTiles(); showEntities(); changed(); });
     list.appendChild(Base.mk('div', { className: 'row' }, [
-      Base.mk('div', { className: 'what' }, [
-        Base.mk('div', { className: 'pair' }, [name, size]), Base.mk('span', { className: 'id', text: t.entity_id })]),
+      Base.mk('div', { className: 'what' }, [name,
+        Base.mk('div', { className: 'pair' }, [size, Base.mk('span', { className: 'id', text: t.entity_id })])]),
       Base.mk('div', { className: 'acts' }, [up, down, remove])]));
   });
+  if (typing) typing.focus();
   showCells();
+}
+
+// A tile's name as the screen shows it, where it's from, and Rename
+function nameShown(t) {
+  var rename = Base.mk('button', { type: 'button', className: 'reset inline', text: 'Rename',
+    'aria-label': 'Rename ' + t.entity_id });
+  rename.addEventListener('click', function () { renaming = t; showTiles(); });
+  return Base.mk('div', { className: 'pair' }, [
+    Base.mk('span', { className: 'name', text: t.name || names[t.entity_id] || t.entity_id }),
+    Base.mk('span', { className: 'from', text: t.name ? 'renamed' : 'Home Assistant\'s' }), rename]);
+}
+
+// Renaming: the name as typed is the tile's (blank, or Home Assistant's, is Home Assistant's); Enter or Done keeps it,
+// Escape puts back what it was
+function renameBox(t) {
+  var ha = names[t.entity_id] || '', was = t.name;
+  var box = Base.mk('input', { type: 'text', maxLength: 32, value: t.name || ha,
+    'aria-label': 'Name on the screen for ' + t.entity_id });
+  var done = function () { renaming = null; showTiles(); };
+  var set = function (name) { t.name = name.trim() === ha ? '' : name; changed(); };
+  box.addEventListener('input', function () { set(box.value); });
+  box.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') { ev.preventDefault(); done(); }
+    else if (ev.key === 'Escape') { t.name = was; done(); }
+  });
+  var ok = Base.mk('button', { type: 'button', className: 'reset inline', text: 'Done' });
+  ok.addEventListener('click', done);
+  var back = Base.mk('button', { type: 'button', className: 'reset inline', text: 'Home Assistant\'s',
+    title: 'Use Home Assistant\'s name', disabled: !ha });
+  back.addEventListener('click', function () { set(ha); done(); });
+  return Base.mk('div', { className: 'pair' }, [box, ok, back]);
 }
 
 // How many of the screen's cells the page's tiles take (an auto tile as one, though a long value makes it two)

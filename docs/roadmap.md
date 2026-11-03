@@ -34,9 +34,9 @@ Checked on the Pi 2 (2026-11-01, Juggle OS v1.1's development build, the display
 - **Touch** comes straight from the touch screen's input device (`/dev/input/event*`, found by name in
   `/proc/bus/input/devices`), read in pure Python (`struct`), so nothing compiled is needed. Juggle OS turns its
   coordinates with the display, so they match what the app draws.
-- **Rotation**: Juggle OS's (`display-rotation`, from App Base's Device tab); the app reads it from
-  `app-request settings` and turns its image to match. The layout follows the screen's shape: landscape (800×480)
-  for now, at 180 degrees as the panel is mounted, and portrait (480×800) later.
+- **Rotation**: Juggle OS's (`display-rotation`, App Base's Display section, on the panel's Display tab); the app
+  reads it from `app-request settings` and turns its image to match. The layout follows the screen's shape:
+  landscape (800×480) for now, at 180 degrees as the panel is mounted, and portrait (480×800) later.
 - **Tearing**: the framebuffer has no vsync. Not seen as a problem for a control panel; to be watched.
 
 ### What Juggle OS needs (1.1)
@@ -84,7 +84,7 @@ The app says `"juggle": "1.1"` and `"display": true`.
 - **Pages** (asked for 2026-11-01): up to six, each with a name and up to twelve tiles. With more than one, the bar
   has a tab for each in place of the date, and a swipe across changes the page. Every page's entities are watched,
   so changing the page is at once.
-- **Chosen on the web page**: the Screen tab has the pages, each page's tiles in order (a name of its own per tile,
+- **Chosen on the web page**: the Tiles tab has the pages, each page's tiles in order (a name of its own per tile,
   or Home Assistant's), and Home Assistant's lights, switches and sensors to add (the page asks the app, which asks
   Home Assistant), filtered by what's typed.
 - **Built for a finger**: large tiles, a dark theme, and a press shown at once.
@@ -92,7 +92,7 @@ The app says `"juggle": "1.1"` and `"display": true`.
   first touch only waking it; and its brightness, a slider that applies when let go, on a curve (gamma 2.2) so
   that half looks half as bright (the backlight's steps are linear, which looked uneven: asked for 2026-11-02).
   The least, 5%, looks as 15% did on the plain curve, below which the screen looked off (2026-11-03).
-  Both on the Screen tab. Dimmer at night could come later.
+  Both on the Display tab (2026-11-03: split from the tiles). Dimmer at night could come later.
 - **On a PC**, the screen opens in a window (Tkinter, from Python's standard library), with the mouse as the finger,
   so most of the work is done without a Pi.
 
