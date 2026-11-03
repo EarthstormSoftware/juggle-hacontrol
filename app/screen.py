@@ -155,6 +155,8 @@ class Backlight:
     FOLDER = Path('/sys/class/backlight')
     POWER_ON, POWER_OFF = 0, 4  # bl_power: FB_BLANK_UNBLANK, FB_BLANK_POWERDOWN
     GAMMA = 2.2
+    LEAST = 5  # the least brightness that can be set, in percent
+    DIMMEST = 0.15  # how bright the least looks (on the curve): any dimmer and the Touch Display looks off
 
     def __init__(self, folder):
         self.folder = folder
@@ -181,8 +183,9 @@ class Backlight:
 
     def set_brightness(self, percent):
         """percent as it looks: the eye sees the backlight's steps as much larger when it's dim, so the steps follow
-        a curve (GAMMA) and half looks about half as bright."""
-        self._write('brightness', max(1, round(self.most * (percent / 100) ** self.GAMMA)))
+        a curve (GAMMA) and half looks about half as bright. The least (LEAST) looks DIMMEST, the most full."""
+        looks = self.DIMMEST + (1 - self.DIMMEST) * (percent - self.LEAST) / (100 - self.LEAST)
+        self._write('brightness', max(1, round(self.most * looks ** self.GAMMA)))
 
 
 class PiScreen:

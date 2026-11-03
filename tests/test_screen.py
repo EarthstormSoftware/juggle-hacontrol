@@ -85,7 +85,7 @@ def test_the_touch_screen_is_found_by_name(tmp_path, monkeypatch):
     assert screen.touch_device() is None
 
 
-@pytest.mark.parametrize('percent, level', [(100, 255), (50, 55), (5, 1)])
+@pytest.mark.parametrize('percent, level', [(100, 255), (50, 69), (10, 7), (5, 4)])
 def test_the_brightness_follows_a_curve_so_half_looks_half_as_bright(tmp_path, percent, level):
     (tmp_path / 'max_brightness').write_text('255')
     screen.Backlight(tmp_path).set_brightness(percent)

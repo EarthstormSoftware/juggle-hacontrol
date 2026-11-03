@@ -91,6 +91,7 @@ The app says `"juggle": "1.1"` and `"display": true`.
 - **The screen itself**: dark (the backlight off) after so many minutes untouched, 5 by default (0 for never), the
   first touch only waking it; and its brightness, a slider that applies when let go, on a curve (gamma 2.2) so
   that half looks half as bright (the backlight's steps are linear, which looked uneven: asked for 2026-11-02).
+  The least, 5%, looks as 15% did on the plain curve, below which the screen looked off (2026-11-03).
   Both on the Screen tab. Dimmer at night could come later.
 - **On a PC**, the screen opens in a window (Tkinter, from Python's standard library), with the mouse as the finger,
   so most of the work is done without a Pi.
