@@ -14,7 +14,8 @@ from pathlib import Path
 from base.log import Log
 from base.settings import Setting, is_int, is_text
 from ha import HomeAssistant, check_address
-from panel import DOMAINS, MOST_PAGES, MOST_TILES, SIZES, Page, Tile
+from panel import (DOMAINS, HOURS, ICON_CHOICES, MOST_PAGES, MOST_TILES, NAME_TEXTS, SHOWS, SIZES, VALUE_TEXTS, Page,
+                   Tile)
 
 NAME = 'HA Control Panel'
 VERSION = json.loads((Path(__file__).parent / 'app.json').read_text(encoding='utf-8'))['version']
@@ -22,19 +23,28 @@ TAG = 'PANEL'
 ENTITY_ID = re.compile(r'([a-z_]+)\.[a-z0-9_]+')
 LONGEST_NAME = 32
 LONGEST_PAGE_NAME = 20
+TILE_KEYS = {'entity_id', 'name', 'size', 'icon', 'show', 'hours', 'gauge'}
+# A page's: text was its names' and content's size together (2026-11-03, briefly), kept so a page saved with it loads
+PAGE_KEYS = {'name', 'tiles', 'name_size', 'value_size', 'text'}
+OLD_TEXTS = ('fit', 'large', 'medium', 'small')
 # How long the screen says an action failed
 FAILED_SECONDS = 5
 
 
+def is_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and abs(value) < 1e9
+
+
 def check_tiles(value):
-    """A Setting check for the tiles: [{"entity_id", "name", "size"}], name optional (Home Assistant's otherwise), size
-    one of SIZES ('auto' if not given)."""
+    """A Setting check for the tiles: [{"entity_id", "name", "size", "icon", "show", "hours", "gauge"}], all but
+    entity_id optional: name (Home Assistant's otherwise), size one of SIZES ('auto'), icon one of ICON_CHOICES
+    ('none'), show one of SHOWS ('value'), hours one of HOURS (24), gauge [low, high] (the one that suits its kind)."""
     if not isinstance(value, list) or len(value) > MOST_TILES:
         return 'must be a list of up to {} tiles'.format(MOST_TILES)
     seen = set()
     for tile in value:
-        if not isinstance(tile, dict) or set(tile) - {'entity_id', 'name', 'size'}:
-            return 'must be tiles of entity_id, name and size'
+        if not isinstance(tile, dict) or set(tile) - TILE_KEYS:
+            return 'must be tiles of {}'.format(', '.join(sorted(TILE_KEYS)))
         entity_id, name = tile.get('entity_id'), tile.get('name', '')
         found = ENTITY_ID.fullmatch(entity_id) if isinstance(entity_id, str) else None
         if not found or found.group(1) not in DOMAINS:
@@ -46,16 +56,35 @@ def check_tiles(value):
             return 'has a name longer than {} characters'.format(LONGEST_NAME)
         if tile.get('size', 'auto') not in SIZES:
             return 'has a size that isn\'t one of {}'.format(', '.join(SIZES))
+        if tile.get('icon', 'none') not in ICON_CHOICES:
+            return 'has an icon that isn\'t one of {}'.format(', '.join(ICON_CHOICES))
+        if tile.get('show', 'value') not in SHOWS:
+            return 'has a way to show it that isn\'t one of {}'.format(', '.join(SHOWS))
+        hours = tile.get('hours', 24)
+        if isinstance(hours, bool) or hours not in HOURS:
+            return 'has hours of history that aren\'t one of {}'.format(', '.join(str(n) for n in HOURS))
+        gauge = tile.get('gauge')
+        if gauge is not None and not (isinstance(gauge, list) and len(gauge) == 2 and all(map(is_number, gauge))
+                                      and gauge[0] < gauge[1]):
+            return 'has a gauge that isn\'t [low, high]'
     return None
 
 
 def check_pages(value):
-    """A Setting check for the pages: [{"name", "tiles"}], each page's tiles as check_tiles has them."""
+    """A Setting check for the pages: [{"name", "tiles", "name_size", "value_size"}], each page's tiles as check_tiles
+    has them, and (optional, 'fit' otherwise) the size of its tiles' names, one of NAME_TEXTS, and of their content,
+    one of VALUE_TEXTS."""
     if not isinstance(value, list) or len(value) > MOST_PAGES:
         return 'must be a list of up to {} pages'.format(MOST_PAGES)
     for page in value:
-        if not isinstance(page, dict) or set(page) != {'name', 'tiles'}:
-            return 'must be pages of name and tiles'
+        if not isinstance(page, dict) or not {'name', 'tiles'} <= set(page) <= PAGE_KEYS:
+            return 'must be pages of name, tiles, name_size and value_size'
+        if page.get('name_size', 'fit') not in NAME_TEXTS:
+            return "has a name size that isn't one of {}".format(', '.join(NAME_TEXTS))
+        if page.get('value_size', 'fit') not in VALUE_TEXTS:
+            return "has a content size that isn't one of {}".format(', '.join(VALUE_TEXTS))
+        if page.get('text', 'fit') not in OLD_TEXTS:
+            return "has a text size that isn't one of {}".format(', '.join(OLD_TEXTS))
         if not isinstance(page['name'], str) or len(page['name']) > LONGEST_PAGE_NAME:
             return 'has a page name longer than {} characters'.format(LONGEST_PAGE_NAME)
         error = check_tiles(page['tiles'])
@@ -95,8 +124,11 @@ def configure(device):
 
 
 def chosen_pages(device):
-    return [Page(page['name'], [Tile(tile['entity_id'], tile.get('name') or None, tile.get('size', 'auto'))
-                                for tile in page['tiles']])
+    return [Page(page['name'], [Tile(tile['entity_id'], tile.get('name') or None, tile.get('size', 'auto'),
+                                     tile.get('icon', 'none'), tile.get('show', 'value'), tile.get('hours', 24),
+                                     tile.get('gauge'))
+                                for tile in page['tiles']],
+                 page.get('name_size', page.get('text', 'fit')), page.get('value_size', page.get('text', 'fit')))
             for page in device.settings.get('screen', 'pages')]
 
 
@@ -179,13 +211,25 @@ async def screen_task(device):
         act('switch ' + tile.look(panel.state(tile.entity_id))[0], ha.call_service(tile.domain, 'toggle',
                                                                                    tile.entity_id))
 
-    def brightness(tile, percent):
-        call = ha.call_service('light', 'turn_on', tile.entity_id, brightness_pct=percent) if percent \
-            else ha.call_service('light', 'turn_off', tile.entity_id)
-        act('set the brightness', call)
+    def adjust(tile, data):
+        """A light's brightness, warmth, colour or effect (light.turn_on's data); a brightness of 0 turns it off."""
+        if data.get('brightness_pct') == 0:
+            act('switch off ' + tile.look(panel.state(tile.entity_id))[0],
+                ha.call_service('light', 'turn_off', tile.entity_id))
+        else:
+            what = {'brightness_pct': 'brightness', 'color_temp_kelvin': 'warmth', 'hs_color': 'colour',
+                    'effect': 'effect'}.get(next(iter(data), ''), 'light')
+            act('set the ' + what, ha.call_service('light', 'turn_on', tile.entity_id, **data))
+
+    async def history(entity_id, hours):
+        try:
+            return await ha.history(entity_id, hours)
+        except Exception as e:
+            Log.warn(TAG, "Couldn't get {}'s history: {}".format(entity_id, e))
+            raise
 
     panel = Panel(screen, state=lambda entity_id: ha.states.get(entity_id) if ha.connected else None,
-                  tapped=tapped, brightness=brightness)
+                  tapped=tapped, adjust=adjust, history=history)
     device.panel = panel
     show_pages(device)
 

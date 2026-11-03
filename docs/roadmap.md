@@ -81,12 +81,25 @@ The app says `"juggle": "1.1"` and `"display": true`.
   (its state and unit, large; a timestamp as how long ago), or a **binary sensor** (on or off). A name wraps onto a
   second line and shrinks to fit, keeping words whole if it can, then breaking them where they join (CounterTopLeft
   at its capitals), and only then anywhere.
+- **More on the tiles** (asked for 2026-11-03): the tiles' names and content each sized to each tile as before, or
+  **one size** on every tile, set for each page (the content's from small to extra large; only what's too long for
+  its tile shrinks); an **icon** on any tile, the one that suits its kind (from Home Assistant's device
+  class: a thermometer for a temperature, a running figure for motion) or one chosen, drawn with Pillow's shapes
+  (`icons.py`), no icon font; a binary sensor's on and off **as its kind calls them** (Detected and Clear, Open and
+  Closed); a number sensor shown as its value, a **gauge** (along its kind's range, or one set) or a **graph** of its
+  history (a binary sensor's as a timeline). A **long press** on a light opens its **controls**: its brightness,
+  warmth (colour temperature), colour (a hue) and effects, whichever Home Assistant says it has, and a button to switch
+  it; on a sensor, its **history** (`history/history_during_period`) over the hours set for the tile, with an hour,
+  six, a day and a week a tap away. A graph's history is asked for again every 15 minutes, with what changes added in
+  between.
 - **Pages** (asked for 2026-11-01): up to six, each with a name and up to twelve tiles. With more than one, the bar
   has a tab for each in place of the date, and a swipe across changes the page. Every page's entities are watched,
   so changing the page is at once.
-- **Chosen on the web page**: the Tiles tab has the pages, each page's tiles in order (a name of its own per tile,
-  or Home Assistant's), and Home Assistant's lights, switches and sensors to add (the page asks the app, which asks
-  Home Assistant), filtered by what's typed.
+- **Chosen on the web page**: the Tiles tab has the pages, and each page's text sizes and tiles in order,
+  a line each (its name, and what it is and how it shows) opened one at a time to edit its settings (a name of its
+  own, or Home Assistant's; its size, icon, and how a sensor shows). Tiles are added in a picker over the page
+  (asked for 2026-11-03, the page having grown cluttered): Home Assistant's lights, switches and sensors (the page
+  asks the app, which asks Home Assistant), by kind and by what's typed, several at a time.
 - **Built for a finger**: large tiles, a dark theme, and a press shown at once.
 - **The screen itself**: dark (the backlight off) after so many minutes untouched, 5 by default (0 for never), the
   first touch only waking it; and its brightness, a slider that applies when let go, on a curve (gamma 2.2) so

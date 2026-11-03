@@ -14,7 +14,8 @@ TOKEN = 'good-token'
 STATES = [
     {'entity_id': 'light.kitchen', 'state': 'on', 'attributes': {'friendly_name': 'Kitchen', 'brightness': 200}},
     {'entity_id': 'sensor.hall_temperature', 'state': '19.5',
-     'attributes': {'friendly_name': 'Hall Temperature', 'unit_of_measurement': '°C'}},
+     'attributes': {'friendly_name': 'Hall Temperature', 'unit_of_measurement': '°C', 'device_class': 'temperature',
+                    'state_class': 'measurement'}},
     {'entity_id': 'automation.night', 'state': 'on', 'attributes': {'friendly_name': 'Night'}},
     {'entity_id': 'light.attic', 'state': 'off', 'attributes': {'friendly_name': 'attic'}},
 ]
@@ -60,6 +61,11 @@ class FakeHomeAssistant:
                     watched = {s['entity_id']: {'s': s['state'], 'a': s['attributes'], 'lu': 1.0}
                                for s in self.states if s['entity_id'] in message['entity_ids']}
                     await self.send({'id': number, 'type': 'event', 'event': {'a': watched}})
+                elif kind == 'history/history_during_period':
+                    found = {entity_id: [{'s': '18.5', 'a': {}, 'lu': 1000.0}, {'s': '19.0', 'lu': 1600.5},
+                                         {'s': 'unavailable', 'lc': 2000.0}]
+                             for entity_id in message['entity_ids']}
+                    await self.send({'id': number, 'type': 'result', 'success': True, 'result': found})
                 elif kind == 'get_states':
                     await self.send({'id': number, 'type': 'result', 'success': True, 'result': self.states})
                 elif kind == 'call_service':
@@ -173,7 +179,24 @@ def test_the_entities_to_choose_from_are_the_lights_sensors_and_switches_by_name
         assert [e['entity_id'] for e in await client.entities()] == ['light.attic', 'sensor.hall_temperature',
                                                                     'light.kitchen']
         assert (await client.entities())[1] == {'entity_id': 'sensor.hall_temperature', 'name': 'Hall Temperature',
-                                                'state': '19.5', 'unit': '°C'}
+                                                'state': '19.5', 'unit': '°C', 'kind': 'Temperature sensor',
+                                                'icon': 'thermometer', 'numeric': True}
+        assert (await client.entities())[0]['kind'] == 'Light'
+        task.cancel()
+    run(test)
+
+
+def test_a_history_is_its_states_with_when_each_began(monkeypatch):
+    monkeypatch.setattr(ha.time, 'time', lambda: 1793566800.0)
+
+    async def test(server):
+        client, _, task = connected(server)
+        await until(lambda: client.connected)
+        assert await client.history('sensor.hall_temperature', 6) == [(1000.0, '18.5'), (1600.5, '19.0'),
+                                                                       (2000.0, 'unavailable')]
+        asked = server.received[-1]
+        assert asked['entity_ids'] == ['sensor.hall_temperature'] and asked['no_attributes']
+        assert asked['start_time'] == '2026-11-01T15:00:00+00:00'  # six hours before
         task.cancel()
     run(test)
 

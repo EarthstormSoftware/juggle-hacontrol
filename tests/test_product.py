@@ -1,9 +1,12 @@
 """The panel's own part, on App Base's real device and settings (saved in a temporary folder)."""
 import json
+import re
 import types
 
 import pytest
 
+import icons
+import kinds
 import product
 from base.device import Device
 
@@ -68,11 +71,40 @@ def page(tiles, name='Page'):
     page([{'entity_id': 'light.kitchen'}] * 2), page([{'entity_id': 'light.Kitchen'}]),
     page([{'entity_id': 'light.kitchen', 'name': 'x' * 33}]), page([{'entity_id': 'light.kitchen', 'colour': 'red'}]),
     page([{'entity_id': 'sensor.s{}'.format(n)} for n in range(13)]), page([], name='x' * 21),
-    page([{'entity_id': 'light.kitchen', 'size': '5x1'}]),
+    page([{'entity_id': 'light.kitchen', 'size': '5x1'}]), page([{'entity_id': 'light.kitchen', 'icon': 'cat'}]),
+    page([{'entity_id': 'sensor.hall', 'show': 'pie'}]), page([{'entity_id': 'sensor.hall', 'hours': 5}]),
+    page([{'entity_id': 'sensor.hall', 'hours': True}]), page([{'entity_id': 'sensor.hall', 'gauge': [30, 10]}]),
+    page([{'entity_id': 'sensor.hall', 'gauge': [0]}]), page([{'entity_id': 'sensor.hall', 'gauge': ['0', 9]}]),
     [{'tiles': []}], page([]) * 7])
 def test_pages_that_cant_be_are_refused(device, pages):
     assert device.change({'screen': {'pages': pages}}) is not None
     assert device.settings.get('screen', 'pages') == []
+
+
+def test_a_tiles_icon_way_of_showing_history_and_gauge_are_kept(device):
+    tile = {'entity_id': 'sensor.hall', 'icon': 'auto', 'show': 'gauge', 'hours': 6, 'gauge': [10, 25.5]}
+    assert device.change({'screen': {'pages': page([tile, {'entity_id': 'binary_sensor.door', 'show': 'graph'}])}})         is None
+    hall, door = product.chosen_pages(device)[0].tiles
+    assert (hall.icon, hall.show, hall.hours, hall.gauge) == ('auto', 'gauge', 6, (10, 25.5))
+    assert (door.icon, door.show, door.hours, door.gauge) == ('none', 'graph', 24, None)
+
+
+@pytest.mark.parametrize('sizes, refused', [
+    ({'name_size': 'small', 'value_size': 'xlarge'}, False), ({'value_size': 'large'}, False),
+    ({'name_size': 'xlarge'}, True), ({'value_size': 'tiny'}, True), ({'text': 'tiny'}, True)])
+def test_a_pages_names_and_content_are_fitted_or_one_size(device, sizes, refused):
+    pages = [dict({'name': 'Hall', 'tiles': []}, **sizes), {'name': 'Kitchen', 'tiles': []}]
+    assert (device.change({'screen': {'pages': pages}}) is not None) == refused
+    if not refused:
+        hall, kitchen = product.chosen_pages(device)
+        assert (hall.name_size, hall.value_size) == (sizes.get('name_size', 'fit'), sizes.get('value_size', 'fit'))
+        assert (kitchen.name_size, kitchen.value_size) == ('fit', 'fit')
+
+
+def test_a_page_saved_with_one_text_size_has_it_for_names_and_content(device):
+    assert device.change({'screen': {'pages': [{'name': 'Hall', 'tiles': [], 'text': 'medium'}]}}) is None
+    hall, = product.chosen_pages(device)
+    assert (hall.name_size, hall.value_size) == ('medium', 'medium')
 
 
 @pytest.mark.parametrize('values', [{'timeout_minutes': -1}, {'timeout_minutes': 241}, {'brightness': 4},
@@ -85,3 +117,9 @@ def test_the_version_is_the_manifests():
     manifest = json.loads((product.Path(product.__file__).parent / 'app.json').read_text())
     assert product.VERSION == manifest['version']
     assert manifest['juggle'] == '1.1' and manifest['name'] == 'hacontrol' and manifest['display'] is True
+
+
+def test_the_pages_icons_are_the_ones_the_screen_draws():
+    page = (product.Path(product.__file__).parent / 'www' / 'index.html').read_text(encoding='utf-8')
+    listed = re.search(r'var ICONS = \[(.*?)\];', page, re.S).group(1)
+    assert tuple(re.findall(r"\['(\w+)', '", listed)) == kinds.ICONS == tuple(icons.DRAWN)

@@ -1,5 +1,5 @@
 """Home Assistant over its WebSocket API (docs/roadmap.md, Home Assistant): the states of the entities the screen
-shows, kept up to date, and the services touches call.
+shows, kept up to date, the services touches call, and a sensor's history when it's asked for.
 
 The connection authenticates with a long-lived access token, then subscribes to just the entities watched
 (subscribe_entities: their state and attributes at once, then only what changes in them), so a busy Home Assistant
@@ -17,13 +17,18 @@ import json
 import os
 import re
 import struct
+import time
+from datetime import datetime, timezone
 
 from base.log import Log
+from kinds import describe, icon
 
 TAG = 'HA'
 PATH = '/api/websocket'
 PORT = 8123
 TIMEOUT = 10
+# A week's history can take Home Assistant a while
+HISTORY_TIMEOUT = 30
 # How often the connection is checked (Home Assistant answers a ping with a pong)
 PING_EVERY = 30
 # Waits between attempts after failures: doubling from the first, up to the last
@@ -291,7 +296,7 @@ class HomeAssistant:
         if touched:
             self.changed(touched)
 
-    async def request(self, message):
+    async def request(self, message, timeout=TIMEOUT):
         """Sends a command and returns Home Assistant's answer. Raises RequestError if it failed, ConnectionError if
         there's no connection."""
         if self._socket is None:
@@ -301,7 +306,7 @@ class HomeAssistant:
         future = asyncio.get_running_loop().create_future()
         self._pending[message['id']] = future
         await self._socket.send(json.dumps(message))
-        answer = await asyncio.wait_for(future, TIMEOUT)
+        answer = await asyncio.wait_for(future, timeout)
         if answer.get('type') == 'result' and not answer.get('success'):
             raise RequestError((answer.get('error') or {}).get('message') or 'Home Assistant refused it')
         return answer.get('result')
@@ -312,12 +317,36 @@ class HomeAssistant:
                                    'service_data': data, 'target': {'entity_id': entity_id}})
 
     async def entities(self, domains=('light', 'sensor', 'binary_sensor', 'switch')):
-        """Every entity in those domains, for choosing tiles: [{"entity_id", "name", "state", "unit"}] by name."""
+        """Every entity in those domains, for choosing tiles: [{"entity_id", "name", "state", "unit", "kind" (what
+        it is: "Motion sensor"), "icon" (the one that suits it), "numeric"}] by name."""
         found = []
         for state in await self.request({'type': 'get_states'}):
-            if state['entity_id'].split('.', 1)[0] in domains:
+            domain = state['entity_id'].split('.', 1)[0]
+            if domain in domains:
                 attributes = state.get('attributes') or {}
+                device_class = attributes.get('device_class')
                 found.append({'entity_id': state['entity_id'],
                               'name': attributes.get('friendly_name') or state['entity_id'],
-                              'state': state.get('state'), 'unit': attributes.get('unit_of_measurement')})
+                              'state': state.get('state'), 'unit': attributes.get('unit_of_measurement'),
+                              'kind': describe(domain, device_class), 'icon': icon(domain, device_class),
+                              'numeric': domain == 'sensor' and (attributes.get('state_class') is not None
+                                                                 or is_number(state.get('state')))})
         return sorted(found, key=lambda entity: entity['name'].lower())
+
+    async def history(self, entity_id, hours):
+        """An entity's states over the last hours: [(when, state)] oldest first, when in seconds since 1970, the
+        first being its state as the time began."""
+        start = datetime.fromtimestamp(time.time() - hours * 3600, timezone.utc).isoformat()
+        found = await self.request({'type': 'history/history_during_period', 'start_time': start,
+                                    'entity_ids': [entity_id], 'minimal_response': True, 'no_attributes': True,
+                                    'significant_changes_only': False}, timeout=HISTORY_TIMEOUT)
+        return [(entry.get('lu') or entry.get('lc'), entry.get('s')) for entry in (found or {}).get(entity_id, [])
+                if (entry.get('lu') or entry.get('lc')) is not None]
+
+
+def is_number(text):
+    try:
+        float(text)
+    except (TypeError, ValueError):
+        return False
+    return True

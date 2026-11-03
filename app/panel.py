@@ -7,24 +7,29 @@ the bar says so.
 The tiles are in pages, each with a name: with more than one, the bar has a tab for each in place of the date, and
 a page is chosen by tapping its tab or by swiping across the screen.
 
-Each tile is a Home Assistant entity, chosen on the page: a light or switch (a tap toggles it; a light's long press
-opens its brightness), or a sensor (its state and unit; a time as how long ago). A tile's name is in a band across
-its top, wrapping onto a second line and shrinking to fit; its value is sized to the tile, a sensor's onto more
-lines when it's long. A touch shows at once on the tile it's on, and a tap (lifted on the same tile)
-acts. Only what changed is drawn again: a tile, or the bar when the minute changes. Home Assistant answers a tap with
-the entity's new state, which redraws the tile.
+Each tile is a Home Assistant entity, chosen on the page: a light or switch (a tap toggles it), or a sensor (its state
+and unit; a time as how long ago; a binary sensor's on and off as its kind calls them, a motion sensor's Detected and
+Clear). A tile's name is in a band across its top, wrapping onto a second line; its value is below. The text is sized
+to each tile (shrinking to fit), or a page's names and content each set to one size on every tile. A tile
+may have an icon (one that suits its kind, or one chosen), and a sensor may show its value as a gauge (along a range)
+or a graph (its history over the hours set). A touch shows at once on the tile it's on, and a tap (lifted on the same
+tile) acts. Only what changed is drawn again: a tile, or the bar when the minute changes. Home Assistant answers a tap
+with the entity's new state, which redraws the tile.
 
-The brightness is a slider across the screen, over the tiles: dragging along it sets the brightness (sent when the
-finger lifts), and a tap off it closes it.
+A long press opens more over the tiles (details.py): a light's brightness, warmth, colour and effects, or a sensor's
+history.
 
 The screen goes dark after the time set without a touch (the backlight off), and the next touch only wakes it.
 """
 import asyncio
-import math
 import time
 from datetime import datetime, timezone
 
 from PIL import Image, ImageDraw, ImageFont
+
+import charts
+import icons
+import kinds
 
 BACKGROUND = (18, 20, 26)
 BAR = (28, 31, 40)
@@ -38,6 +43,8 @@ BAND = (64, 70, 88)
 BAND_ON = (214, 156, 44)
 TEXT_ON = (24, 22, 18)
 WARNING = (240, 150, 90)
+# Below a graph's line
+GRAPH_FILL = (66, 60, 48)
 # How much lighter a tile is while it's touched
 PRESSED = 40
 MARGIN = 12
@@ -61,9 +68,29 @@ VALUE_SIZES = (48, 16)
 STATE_SIZE = 24
 AUTO_LEAST = 22
 LINE_GAP = 4
-# How long a press is held to open a light's brightness
+# The tiles' text: sized to each tile, or (name, value) the same on every one
+# A page's text: its tiles' names and their content each sized to the tile ('fit'), or one size on every tile (shrinking
+# only what's too long for its tile at that size)
+NAME_TEXT = {'large': 22, 'medium': 18, 'small': 15}
+VALUE_TEXT = {'xlarge': 56, 'large': 42, 'medium': 30, 'small': 22}
+NAME_TEXTS = ('fit',) + tuple(NAME_TEXT)
+VALUE_TEXTS = ('fit',) + tuple(VALUE_TEXT)
+# How a sensor shows its value: as it is, along a range, or with its history; and the hours a history can be
+SHOWS = ('value', 'gauge', 'graph')
+HOURS = (1, 3, 6, 12, 24, 48, 168)
+# A tile's icon: none, the one that suits its kind, or one of kinds.ICONS
+ICON_CHOICES = ('none', 'auto') + kinds.ICONS
+ICON_MOST = 56
+ICON_GAP = 10
+# With the content one size, an icon's size for it
+ICON_TO_TEXT = 1.4
+GAUGE_HEIGHT = 12
+# How long a history is kept before it's asked for again (a tile's graph adds what changes in between), and how
+# long after asking failed
+HISTORY_FRESH = 15 * 60
+HISTORY_RETRY = 60
+# How long a press is held to open a light's controls or a sensor's history
 LONG_PRESS = 0.6
-SLIDER_HEIGHT = 96
 # The entities a tile can be, and which of them toggle
 DOMAINS = ('light', 'switch', 'sensor', 'binary_sensor')
 TOGGLES = ('light', 'switch')
@@ -72,8 +99,13 @@ MOST_PAGES = 6
 
 
 class Page:
-    def __init__(self, name, tiles):
+    """A page of tiles: its name, its tiles, and the size of their names (one of NAME_TEXTS) and of their content
+    (one of VALUE_TEXTS)."""
+
+    def __init__(self, name, tiles, name_size='fit', value_size='fit'):
         self.name, self.tiles = name, list(tiles)[:MOST_TILES]
+        self.name_size = name_size if name_size in NAME_TEXTS else 'fit'
+        self.value_size = value_size if value_size in VALUE_TEXTS else 'fit'
 
 
 def brightness_percent(brightness):
@@ -105,13 +137,18 @@ def ago(text, now):
 
 class Tile:
     """A Home Assistant entity on the screen. name: the page's own for it, or None for Home Assistant's; size: one of
-    SIZES."""
+    SIZES; icon: one of ICON_CHOICES; show: one of SHOWS (a sensor's); hours: its history's, one of HOURS; gauge: the
+    range a gauge shows (low, high), or None for the one that suits its kind."""
 
-    def __init__(self, entity_id, name=None, size='auto'):
+    def __init__(self, entity_id, name=None, size='auto', icon='none', show='value', hours=24, gauge=None):
         self.entity_id = entity_id
         self.domain = entity_id.split('.', 1)[0]
         self.name = name
         self.size = size if size in SIZES else 'auto'
+        self.icon = icon if icon in ICON_CHOICES else 'none'
+        self.show = show if show in SHOWS else 'value'
+        self.hours = hours if hours in HOURS else 24
+        self.gauge = tuple(gauge) if gauge else None
         self.span = (1, 1)  # the cells it has, across and down
         self.box = None  # None when it doesn't fit
 
@@ -123,7 +160,10 @@ class Tile:
         value = (state or {}).get('state')
         if value is None or value in ('unavailable', 'unknown'):
             return title, 'Unavailable' if value == 'unavailable' else '—', False, False
-        if self.domain in TOGGLES or self.domain == 'binary_sensor':
+        if self.domain == 'binary_sensor':
+            on = value == 'on'
+            return title, kinds.on_off(attributes.get('device_class'))[0 if on else 1], on, True
+        if self.domain in TOGGLES:
             on = value == 'on'
             text = 'On' if on else 'Off'
             if on and self.domain == 'light' and attributes.get('brightness') is not None:
@@ -139,17 +179,44 @@ class Tile:
     def toggles(self):
         return self.domain in TOGGLES
 
-    def dims(self, state):
-        """Whether its brightness can be set (a light that has one)."""
-        modes = ((state or {}).get('attributes') or {}).get('supported_color_modes') or []
-        return self.domain == 'light' and any(mode != 'onoff' for mode in modes)
-
     def shows_time(self, state):
         return ((state or {}).get('attributes') or {}).get('device_class') == 'timestamp'
 
     def says_more(self):
         """Whether its value can be long (a sensor's), not only on or off."""
         return not (self.toggles() or self.domain == 'binary_sensor')
+
+    def icon_name(self, state):
+        """The icon it shows, or None."""
+        if self.icon == 'auto':
+            return kinds.icon(self.domain, kinds.device_class(state))
+        return None if self.icon == 'none' else self.icon
+
+    def showing(self, state):
+        """How it shows its value now: 'gauge' or 'graph' only when it can (a number, or a graph of on and off),
+        'value' otherwise."""
+        if self.show == 'value' or not (state and state.get('state') not in (None, 'unavailable', 'unknown')):
+            return 'value'
+        if self.domain == 'binary_sensor':
+            return 'graph' if self.show == 'graph' else 'value'
+        if self.domain != 'sensor' or charts.number(state.get('state')) is None:
+            return 'value'
+        return self.show
+
+    def gauge_range(self, state):
+        attributes = (state or {}).get('attributes') or {}
+        return self.gauge or kinds.gauge_range(attributes.get('device_class'),
+                                               attributes.get('unit_of_measurement')) or (0, 100)
+
+
+class History:
+    """An entity's history as Home Assistant gave it, and what's changed since: points [(when, state)], or None until
+    it comes (or when asking failed)."""
+
+    def __init__(self):
+        self.points = None
+        self.loading = False
+        self.at = None  # when it came, or asking failed (the panel's clock)
 
 
 def cells(width, height):
@@ -168,12 +235,16 @@ def place(free, across, down):
 
 class Panel:
     """The screen's picture. state(entity_id) gives an entity's state (None when it isn't known); tapped(tile) and
-    brightness(tile, percent) act on Home Assistant. The screen may have a backlight (on(), off())."""
+    adjust(tile, data) act on Home Assistant (adjust with a light's light.turn_on data: brightness_pct,
+    color_temp_kelvin, hs_color, effect; a brightness_pct of 0 turns it off); history(entity_id, hours) is a
+    coroutine giving its history [(when, state)], or None where there's none. The screen may have a backlight (on(),
+    off())."""
 
     def __init__(self, screen, state=lambda entity_id: None, tapped=lambda tile: None,
-                 brightness=lambda tile, percent: None, now=time.localtime, clock=time.monotonic):
-        self.screen, self.state, self.tapped, self.brightness = screen, state, tapped, brightness
-        self.now, self.clock = now, clock
+                 adjust=lambda tile, data: None, history=None, now=time.localtime, clock=time.monotonic,
+                 wall=time.time):
+        self.screen, self.state, self.tapped, self.adjust, self.history = screen, state, tapped, adjust, history
+        self.now, self.clock, self.wall = now, clock, wall
         self.width, self.height = screen.size
         self.image = Image.new('RGB', screen.size, BACKGROUND)
         self.draw = ImageDraw.Draw(self.image)
@@ -189,10 +260,8 @@ class Panel:
         self.swiping = False
         self.pressed = None
         self.held = None  # the long press's timer
-        self.adjusting = None  # the tile whose brightness is open
-        self.level = None  # its brightness, as dragged
-        # A touch on the slider (dragging), or off it (a tap there closes it)
-        self.dragging = self.outside = False
+        self.detail = None  # what a long press opened (details.py), over the tiles
+        self.histories = {}  # (entity_id, hours): History
         self.minute = None
         # What's wrong (Home Assistant not connected), shown in the bar, or None
         self.status = None
@@ -212,6 +281,7 @@ class Panel:
     def set_pages(self, pages, hint=None):
         """The pages (Page), shown from the first; hint is shown when they have no tiles."""
         self.pages, self.hint = list(pages)[:MOST_PAGES] or [Page('', [])], hint
+        self.histories = {}
         self.go_to(0)
 
     def set_tiles(self, tiles, hint=None):
@@ -220,7 +290,7 @@ class Panel:
 
     def go_to(self, page):
         self.page = page
-        self.pressed = self.adjusting = None
+        self.pressed = self.detail = None
         self.cancel_hold()
         self.layout()
         if self.shown:
@@ -254,15 +324,41 @@ class Panel:
 
     def wanted(self, tile):
         """The cells a tile wants (across, down), no more than the grid has: its size, or for 'auto' one cell, or two
-        across when its value wouldn't fit in one at AUTO_LEAST in two lines."""
+        across when its value wouldn't fit in one in two lines (at AUTO_LEAST, or the content's size), beside its
+        icon if it has one."""
         if tile.size != 'auto':
             across, down = (int(n) for n in tile.size.split('x'))
         else:
-            _, value, _, available = tile.look(self.state(tile.entity_id))
-            fits = not (tile.says_more() and available) or self.wrapped(
-                value, self.cell_width - 2 * PADDING, 2, (AUTO_LEAST, AUTO_LEAST), shorten=False)
+            state = self.state(tile.entity_id)
+            _, value, _, available = tile.look(state)
+            size = AUTO_LEAST if self.value_text == 'fit' else VALUE_TEXT[self.value_text]
+            width = self.cell_width - 2 * PADDING - (ICON_MOST * 3 // 4 + ICON_GAP if tile.icon_name(state) else 0)
+            fits = not (tile.says_more() and available) or self.wrapped(value, width, 2, (size, size), shorten=False)
             across, down = (1, 1) if fits else (2, 1)
         return min(across, self.grid[0]), min(down, self.grid[1])
+
+    @property
+    def name_text(self):
+        """The shown page's names' size."""
+        return self.pages[self.page].name_size if self.pages else 'fit'
+
+    @property
+    def value_text(self):
+        """The shown page's content's size."""
+        return self.pages[self.page].value_size if self.pages else 'fit'
+
+    def name_sizes(self):
+        """(most, least) for a name."""
+        if self.name_text == 'fit':
+            return NAME_SIZES
+        size = NAME_TEXT[self.name_text]
+        return size, min(size, NAME_SIZES[1])
+
+    def value_sizes(self, tile):
+        """(most, least) for a tile's value."""
+        if self.value_text == 'fit':
+            return VALUE_SIZES if tile.says_more() else (STATE_SIZE, VALUE_SIZES[1])
+        return VALUE_TEXT[self.value_text], VALUE_SIZES[1]
 
     def tile_at(self, x, y):
         return next((tile for tile in self.tiles
@@ -401,7 +497,7 @@ class Panel:
         self.draw.rounded_rectangle((left, top, right - 1, bottom - 1), radius=RADIUS, fill=fill)
 
         # The name, in a band across the top: one line if it fits, or two
-        font, lines = self.wrapped(title, inside, 2, NAME_SIZES)
+        font, lines = self.wrapped(title, inside, 2, self.name_sizes())
         below = top + 2 * BAND_PADDING + len(lines) * font.size + (len(lines) - 1) * 3
         self.draw.rounded_rectangle((left, top, right - 1, below), radius=RADIUS, fill=band,
                                     corners=(True, True, False, False))
@@ -410,49 +506,143 @@ class Panel:
             self.draw.text((left + PADDING, y), line, font=font, fill=text)
             y += font.size + 3
 
-        # The value, sized to what's below: one line for on or off, a sensor's onto more when it's long
-        height = bottom - below - 2 * PADDING
-        if tile.says_more() and available:
-            font, lines = self.fitted(value, inside, height, VALUE_SIZES, 3)
-        else:
-            font, lines = self.fitted(value, inside, height, (STATE_SIZE, VALUE_SIZES[1]), 1)
-        y = bottom - PADDING - (len(lines) - 1) * (font.size + LINE_GAP)
-        for line in lines:
-            self.draw.text((left + PADDING, y), line, font=font, fill=muted, anchor='ls')
-            y += font.size + LINE_GAP
+        # Below it: the value (beside its icon), and its gauge or graph under that
+        body = [left + PADDING, below + PADDING, right - PADDING, bottom - PADDING]
+        showing = tile.showing(state)
+        chart = None
+        if showing != 'value':
+            height = body[3] - body[1]
+            text_height = (min(self.value_sizes(tile)[0], max(height // 2, 20)) if showing == 'graph'
+                           else height - GAUGE_HEIGHT - PADDING)
+            chart = (body[0], body[1] + text_height + PADDING // 2, body[2], body[3])
+            body[3] = body[1] + text_height
+        name = tile.icon_name(state)
+        if name:
+            # As large as the text allows, its foot on the value's line
+            most = ICON_MOST if self.value_text == 'fit' else round(VALUE_TEXT[self.value_text] * ICON_TO_TEXT)
+            side = int(min(body[3] - body[1], most, (body[2] - body[0]) // 3))
+            top = body[3] - side if showing == 'value' else (body[1] + body[3] - side) // 2
+            icons.draw(self.image, name, body[0], top, side, text if on else (TILE_ON if available else FAINT))
+            body[0] += side + ICON_GAP
+        self.draw_value(tile, value, body, muted, available and showing == 'value')
+        if showing == 'gauge':
+            self.draw_gauge(tile, state, chart, on)
+        elif showing == 'graph':
+            self.draw_graph(tile, chart, on)
         return tile.box
+
+    def draw_value(self, tile, value, box, colour, more_lines):
+        """The value at the bottom of box, sized to it: one line for on or off, a sensor's onto more when it's long."""
+        left, top, right, bottom = box
+        sizes = self.value_sizes(tile)
+        if tile.says_more() and more_lines:
+            font, lines = self.fitted(value, right - left, bottom - top, sizes, 3)
+        else:
+            font, lines = self.fitted(value, right - left, bottom - top, sizes, 1)
+        y = bottom - (len(lines) - 1) * (font.size + LINE_GAP)
+        for line in lines:
+            self.draw.text((left, y), line, font=font, fill=colour, anchor='ls')
+            y += font.size + LINE_GAP
+
+    def draw_gauge(self, tile, state, box, on):
+        left, _, right, bottom = box
+        top = bottom - GAUGE_HEIGHT
+        low, high = tile.gauge_range(state)
+        fraction = min(1, max(0, (charts.number(state['state']) - low) / (high - low)))
+        radius = GAUGE_HEIGHT // 2
+        self.draw.rounded_rectangle((left, top, right - 1, bottom - 1), radius=radius, fill=BAND_ON if on else BAND)
+        filled = left + round((right - left) * fraction)
+        if filled > left:
+            self.draw.rounded_rectangle((left, top, max(filled, left + 2 * radius) - 1, bottom - 1), radius=radius,
+                                        fill=TEXT_ON if on else TILE_ON)
+
+    def draw_graph(self, tile, box, on):
+        """The tile's history (as much as has come): a line, or a binary sensor's timeline."""
+        found = self.history_for(tile.entity_id, tile.hours)
+        if not found or not found.points:
+            return
+        end = self.wall()
+        start = end - tile.hours * 3600
+        if tile.domain == 'binary_sensor':
+            charts.timeline(self.draw, box, found.points, start, end, TEXT_ON if on else TILE_ON,
+                            BAND_ON if on else BAND, radius=4)
+        else:
+            charts.line(self.draw, box, found.points, start, end, TEXT_ON if on else TILE_ON,
+                        fill=BAND_ON if on else GRAPH_FILL)
+
+    # Histories, for graphs
+
+    def history_for(self, entity_id, hours):
+        """The entity's History over hours, asking Home Assistant for it when there isn't one or it's old (and
+        drawing again what shows it when it comes); None when there's no history to ask."""
+        if self.history is None:
+            return None
+        key = entity_id, hours
+        found = self.histories.get(key)
+        if found is None:
+            found = self.histories[key] = History()
+        stale = found.at is None or self.clock() - found.at >= (HISTORY_FRESH if found.points is not None
+                                                                else HISTORY_RETRY)
+        if stale and not found.loading:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return found  # not running (drawn for a test): nothing to ask with
+            found.loading = True
+            asyncio.ensure_future(self.fetch(key, found))
+        return found
+
+    async def fetch(self, key, found):
+        try:
+            found.points = [tuple(point) for point in await self.history(*key)]
+        except Exception:  # not connected, timed out, refused: asked again later
+            pass
+        found.loading = False
+        found.at = self.clock()
+        if self.histories.get(key) is not found or not self.shown:
+            return
+        if self.detail:
+            if self.detail.tile.entity_id == key[0]:
+                self.detail.show()
+            return
+        for tile in self.tiles:
+            if (tile.entity_id, tile.hours) == key and tile.showing(self.state(tile.entity_id)) == 'graph':
+                self.screen.show(self.image, self.draw_tile(tile))
+
+    def add_to_histories(self, entity_ids):
+        """What changed, added to the histories kept of it."""
+        now = self.wall()
+        for (entity_id, hours), found in self.histories.items():
+            if found.points is None or (entity_ids is not None and entity_id not in entity_ids):
+                continue
+            state = (self.state(entity_id) or {}).get('state')
+            if state is not None and (not found.points or found.points[-1][1] != state):
+                found.points.append((now, state))
+            # What's older than the time shown goes, keeping the state the time began with
+            while len(found.points) > 1 and found.points[1][0] <= now - hours * 3600:
+                found.points.pop(0)
 
     def draw_hint(self):
         if self.hint and not self.tiles:
             self.draw.text((self.width // 2, (BAR_HEIGHT + self.height) // 2), self.hint, font=self.font(24),
                            fill=MUTED, anchor='mm')
 
-    def slider_box(self):
-        top = (BAR_HEIGHT + self.height - SLIDER_HEIGHT) // 2
-        return (MARGIN * 3, top, self.width - MARGIN * 3, top + SLIDER_HEIGHT)
+    def strip(self, colours, height):
+        """An image of colours side by side, a pixel each, height high."""
+        line = Image.new('RGB', (len(colours), 1))
+        line.putdata(colours)
+        return line.resize((len(colours), height), Image.Resampling.NEAREST)
 
-    def draw_brightness(self):
-        """The open brightness: its tile's name, and the slider filled to the level."""
-        area = (0, BAR_HEIGHT, self.width, self.height)
-        left, top, right, bottom = self.slider_box()
-        self.draw.rectangle(area, fill=BACKGROUND)
-        title = self.adjusting.look(self.state(self.adjusting.entity_id))[0]
-        self.draw.text((self.width // 2, top - 40), self.shortened(title, self.font(28), right - left),
-                       font=self.font(28), fill=TEXT, anchor='mm')
-        self.draw.rounded_rectangle((left, top, right - 1, bottom - 1), radius=RADIUS, fill=TILE)
-        filled = left + (right - left) * self.level // 100
-        if filled > left:
-            self.draw.rounded_rectangle((left, top, max(filled, left + 2 * RADIUS) - 1, bottom - 1), radius=RADIUS,
-                                        fill=TILE_ON)
-        self.draw.text((self.width // 2, bottom + 40), '{}%  ·  tap outside the bar to close'.format(self.level),
-                       font=self.font(20), fill=MUTED, anchor='mm')
-        return area
+    def rounded_mask(self, width, height, radius):
+        found = Image.new('L', (width, height), 0)
+        ImageDraw.Draw(found).rounded_rectangle((0, 0, width - 1, height - 1), radius=radius, fill=255)
+        return found
 
     def show_all(self):
         self.draw.rectangle((0, 0, self.width, self.height), fill=BACKGROUND)
         self.draw_bar()
-        if self.adjusting:
-            self.draw_brightness()
+        if self.detail:
+            self.detail.draw()
         else:
             for tile in self.tiles:
                 self.draw_tile(tile)
@@ -468,12 +658,12 @@ class Panel:
 
     def changed(self, entity_ids):
         """Home Assistant's states changed: those entities' (None: all)."""
+        self.add_to_histories(entity_ids)
         if not self.shown:
             return
-        if self.adjusting:
-            if entity_ids is None or self.adjusting.entity_id in entity_ids:
-                if not self.adjusting.dims(self.state(self.adjusting.entity_id)):
-                    self.close_brightness()
+        if self.detail:
+            if entity_ids is None or self.detail.tile.entity_id in entity_ids:
+                self.detail.changed()
             return
         shown = [tile for tile in self.pages[self.page].tiles if entity_ids is None or tile.entity_id in entity_ids]
         if any(tile.size == 'auto' and self.wanted(tile) != tile.span for tile in shown):
@@ -498,15 +688,16 @@ class Panel:
             if kind == 'up':
                 self.waking = False
             return
-        if self.adjusting:
-            self.touched_brightness(kind, x, y)
+        if self.detail:
+            self.detail.touched(kind, x, y)
         elif kind == 'down':
             self.start, self.swiping = (x, y), False
             self.pressed = self.tile_at(x, y)
-            if self.pressed and self.pressed.toggles():
+            holds = self.pressed and self.holds(self.pressed)
+            if self.pressed and (self.pressed.toggles() or holds):
                 self.screen.show(self.image, self.draw_tile(self.pressed))
-                if self.pressed.dims(self.state(self.pressed.entity_id)):
-                    self.held = asyncio.get_running_loop().call_later(LONG_PRESS, self.open_brightness, self.pressed)
+                if holds:
+                    self.held = asyncio.get_running_loop().call_later(LONG_PRESS, self.open_detail, self.pressed)
             else:
                 self.pressed = None
         elif kind == 'move':
@@ -528,7 +719,7 @@ class Panel:
                 tile, self.pressed = self.pressed, None
                 self.cancel_hold()
                 self.screen.show(self.image, self.draw_tile(tile))
-                if self.tile_at(x, y) is tile:
+                if self.tile_at(x, y) is tile and tile.toggles():
                     self.tapped(tile)
             elif start and y < BAR_HEIGHT and start[1] < BAR_HEIGHT:
                 tab = self.tab_at(x)
@@ -549,37 +740,24 @@ class Panel:
             self.held.cancel()
             self.held = None
 
-    def open_brightness(self, tile):
+    def holds(self, tile):
+        """Whether a long press on it opens something: a light's controls (when it has more than on and off), or a
+        sensor's history."""
+        from details import LightDetail
+        if tile.domain == 'light':
+            return bool(LightDetail.can(self.state(tile.entity_id)))
+        return tile.domain in ('sensor', 'binary_sensor') and self.history is not None
+
+    def open_detail(self, tile):
+        from details import HistoryDetail, LightDetail
         self.held = None
         self.pressed = None
-        self.adjusting = tile
-        attributes = (self.state(tile.entity_id) or {}).get('attributes') or {}
-        self.level = brightness_percent(attributes['brightness']) if attributes.get('brightness') else 0
-        self.dragging = self.outside = False
+        self.detail = (LightDetail if tile.domain == 'light' else HistoryDetail)(self, tile)
         self.show_all()
 
-    def close_brightness(self):
-        self.adjusting = None
+    def close_detail(self):
+        self.detail = None
         self.show_all()
-
-    def touched_brightness(self, kind, x, y):
-        left, top, right, bottom = self.slider_box()
-        on_slider = left - MARGIN <= x < right + MARGIN and top - MARGIN <= y < bottom + MARGIN
-        if kind == 'down':
-            # The finger that opened it is still down: its lifting isn't a tap off the slider
-            self.dragging = on_slider
-            self.outside = not on_slider
-        if kind in ('down', 'move') and self.dragging:
-            level = min(100, max(0, round((x - left) * 100 / (right - left))))
-            if level != self.level:
-                self.level = level
-                self.screen.show(self.image, self.draw_brightness())
-        elif kind == 'up':
-            if self.dragging:
-                self.dragging = False
-                self.brightness(self.adjusting, self.level)
-            elif self.outside:
-                self.close_brightness()
 
     # The screen going dark, and waking
 
@@ -587,8 +765,8 @@ class Panel:
         self.awake = False
         self.cancel_hold()
         self.pressed = None
-        if self.adjusting:
-            self.adjusting = None
+        if self.detail:
+            self.detail = None
             self.show_all()
         backlight = getattr(self.screen, 'backlight', None)
         if backlight:
@@ -606,9 +784,12 @@ class Panel:
         now = self.now()
         if (now.tm_hour, now.tm_min) != self.minute:
             self.screen.show(self.image, self.draw_bar())
-            if not self.adjusting:
+            if self.detail:
+                self.detail.tick()
+            else:
                 for tile in self.tiles:
-                    if tile.shows_time(self.state(tile.entity_id)):
+                    state = self.state(tile.entity_id)
+                    if tile.shows_time(state) or tile.showing(state) == 'graph':
                         self.screen.show(self.image, self.draw_tile(tile))
         if self.awake and self.timeout and self.clock() - self.touched_at >= self.timeout:
             self.sleep()
