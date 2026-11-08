@@ -172,6 +172,20 @@ def test_a_time_is_shown_as_how_long_ago(seconds, text):
     assert panel.ago('2026-11-01T21:00:00+00:00', 1793566800 + seconds) == text
 
 
+@pytest.mark.parametrize('text, shown', [
+    ('233.624000178386', '234'), ('38.7217946144825', '38.7'), ('4.896', '4.90'), ('0.156', '0.156'),
+    ('0.054495167', '0.0545'), ('1779.56864', '1780'), ('-12.34567', '-12.3'), ('0.000', '0'),
+    ('5.1', '5.1'), ('229.23', '229.23'), ('23', '23'), ('100.115.69.23', '100.115.69.23'), ('normal', 'normal'),
+])
+def test_only_a_number_with_a_long_tail_is_shortened(text, shown):
+    assert panel.short_number(text) == shown
+
+
+def test_a_sensors_long_number_is_shortened_with_its_unit():
+    state = {'state': '233.624000178386', 'attributes': {'unit_of_measurement': 'KiB/s'}}
+    assert panel.Tile('sensor.speed').look(state)[1] == '234 KiB/s'
+
+
 def test_a_name_of_its_own_replaces_home_assistants():
     assert panel.Tile('light.kitchen', 'Worktop').look(STATES['light.kitchen'])[0] == 'Worktop'
 

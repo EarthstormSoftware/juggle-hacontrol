@@ -22,6 +22,8 @@ history.
 The screen goes dark after the time set without a touch (the backlight off), and the next touch only wakes it.
 """
 import asyncio
+import math
+import re
 import time
 from datetime import datetime, timezone
 
@@ -96,6 +98,7 @@ DOMAINS = ('light', 'switch', 'sensor', 'binary_sensor')
 TOGGLES = ('light', 'switch')
 MOST_TILES = 12
 MOST_PAGES = 6
+LONG_DECIMALS = re.compile(r'-?\d+\.\d{3,}')
 
 
 class Page:
@@ -111,6 +114,17 @@ class Page:
 def brightness_percent(brightness):
     """Home Assistant's brightness (0-255) as a percentage, at least 1 for a light that's on."""
     return max(1, round(brightness * 100 / 255))
+
+
+def short_number(text):
+    """A number Home Assistant gave with more than two decimals (233.624000178386) to three significant digits (234),
+    never shortening its whole part; anything else as it is."""
+    if not LONG_DECIMALS.fullmatch(text):
+        return text
+    value = float(text)
+    if value == 0:
+        return '0'
+    return '{:.{}f}'.format(value, max(0, 2 - math.floor(math.log10(abs(value)))))
 
 
 def ago(text, now):
@@ -174,7 +188,7 @@ class Tile:
             if when:
                 return title, when, False, True
         unit = attributes.get('unit_of_measurement')
-        return title, value + (' ' + unit if unit else ''), False, True
+        return title, short_number(value) + (' ' + unit if unit else ''), False, True
 
     def toggles(self):
         return self.domain in TOGGLES
