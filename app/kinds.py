@@ -59,8 +59,16 @@ SENSOR = {
 # The icons a tile can have (icons.py draws them), with names for the page
 ICONS = ('bulb', 'plug', 'thermometer', 'drop', 'motion', 'door', 'window', 'battery', 'sun', 'bolt', 'alert', 'clock',
          'gauge', 'signal', 'lock', 'air')
-DOMAIN_ICONS = {'light': 'bulb', 'switch': 'plug', 'sensor': 'gauge', 'binary_sensor': 'alert'}
-DOMAIN_NAMES = {'light': 'Light', 'switch': 'Switch', 'sensor': 'Sensor', 'binary_sensor': 'Binary sensor'}
+DOMAIN_ICONS = {'light': 'bulb', 'switch': 'plug', 'sensor': 'gauge', 'binary_sensor': 'alert', 'cover': 'window',
+                'weather': 'sun'}
+DOMAIN_NAMES = {'light': 'Light', 'switch': 'Switch', 'sensor': 'Sensor', 'binary_sensor': 'Binary sensor',
+                'cover': 'Blind', 'weather': 'Weather'}
+# Binary sensors whose on means something's wrong, and those whose off does (the rest: on is merely active)
+WRONG_WHEN_ON = ('problem', 'safety', 'smoke', 'gas', 'carbon_monoxide', 'tamper', 'moisture', 'battery', 'heat', 'cold')
+WRONG_WHEN_OFF = ('connectivity',)
+# Home Assistant's weather conditions, where its word doesn't read as one
+WEATHER = {'clear-night': 'Clear', 'partlycloudy': 'Partly cloudy', 'lightning-rainy': 'Thunderstorm',
+           'snowy-rainy': 'Sleet', 'windy-variant': 'Windy', 'exceptional': 'Severe'}
 
 
 def device_class(state):
@@ -86,6 +94,20 @@ def icon(domain, device_class):
 def on_off(device_class):
     """What a binary sensor's on and off are called."""
     return BINARY[device_class][:2] if device_class in BINARY else ('On', 'Off')
+
+
+def mood(device_class, on):
+    """How a binary sensor stands out: 'alert' when it says something's wrong, 'lit' when active, otherwise 'calm'."""
+    if device_class in WRONG_WHEN_OFF:
+        return 'calm' if on else 'alert'
+    if device_class in WRONG_WHEN_ON:
+        return 'alert' if on else 'calm'
+    return 'lit' if on else 'calm'
+
+
+def weather(condition):
+    """A weather entity's state in words."""
+    return WEATHER.get(condition, condition.replace('-', ' ').capitalize())
 
 
 def gauge_range(device_class, unit):

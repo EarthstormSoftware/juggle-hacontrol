@@ -4,15 +4,18 @@ one down), or 'auto': one cell, or two across when its value wouldn't fit in one
 in the first place it fits (so a small tile can fill a gap a larger one left); one that fits nowhere is left off, and
 the bar says so.
 
-The tiles are in pages, each with a name: with more than one, the bar has a tab for each in place of the date, and
+A page can instead be laid out in rooms: a row for each room, its name at the left and its tiles as slim buttons beside
+it, lined up down the page. The tiles are in pages, each with a name: with more than one, the bar has a tab for each in place of the date, and
 a page is chosen by tapping its tab or by swiping across the screen.
 
-Each tile is a Home Assistant entity, chosen on the page: a light or switch (a tap toggles it), or a sensor (its state
-and unit; a time as how long ago; a binary sensor's on and off as its kind calls them, a motion sensor's Detected and
-Clear). A tile's name is in a band across its top, wrapping onto a second line; its value is below. The text is sized
-to each tile (shrinking to fit), or a page's names and content each set to one size on every tile. A tile
-may have an icon (one that suits its kind, or one chosen), and a sensor may show its value as a gauge (along a range)
-or a graph (its history over the hours set). A touch shows at once on the tile it's on, and a tap (lifted on the same
+Each tile is a Home Assistant entity, chosen on the page: a light, switch or blind (a tap toggles it), the weather, or
+a sensor (its state and unit; a time as how long ago; a binary sensor's on and off as its kind calls them, a motion
+sensor's Detected and Clear). A tile is flat and dark: its name at the top, wrapping onto a second line, a small icon
+in its corner if it has one (one that suits its kind, or one chosen), and its value at the foot, a number large with
+its unit small. Colour says something: a warm tile is lit or open or active, a red one is wrong, and what's merely
+normal (an internet connection that's up) stays dark. The text is sized to each tile (shrinking to fit), or a page's
+names and content each set to one size on every tile. A sensor may show its value as a gauge (along a range) or a
+graph (its history over the hours set). A touch shows at once on the tile it's on, and a tap (lifted on the same
 tile) acts. Only what changed is drawn again: a tile, or the bar when the minute changes. Home Assistant answers a tap
 with the entity's new state, which redraws the tile.
 
@@ -33,20 +36,25 @@ import charts
 import icons
 import kinds
 
-BACKGROUND = (18, 20, 26)
-BAR = (28, 31, 40)
-TEXT = (235, 235, 240)
-MUTED = (150, 155, 170)
+BACKGROUND = (16, 18, 23)
+BAR = (24, 27, 34)
+TEXT = (238, 240, 244)
+MUTED = (150, 156, 170)
 FAINT = (90, 95, 110)
-TILE = (44, 48, 60)
+TILE = (34, 38, 47)
+# The accent: icons, gauges and graphs, and what's chosen in a light's controls
 TILE_ON = (250, 190, 70)
-# The band with the tile's name
-BAND = (64, 70, 88)
-BAND_ON = (214, 156, 44)
 TEXT_ON = (24, 22, 18)
+# A tile that's lit, open or active, and one that's wrong
+LIT = (74, 57, 28)
+ALERT = (98, 40, 38)
+LIT_NAME = (232, 208, 160)
+ALERT_NAME = (250, 200, 190)
+ALERT_ICON = (255, 170, 150)
 WARNING = (240, 150, 90)
-# Below a graph's line
-GRAPH_FILL = (66, 60, 48)
+# Behind a gauge, and below a graph's line
+TRACK = (58, 63, 76)
+GRAPH_FILL = (64, 55, 38)
 # How much lighter a tile is while it's touched
 PRESSED = 40
 MARGIN = 12
@@ -56,20 +64,33 @@ TAB_PADDING = 14
 # How far a finger moves across to change the page, and how far before it's a swipe rather than a press
 SWIPE = 100
 SWIPE_START = 30
-PADDING = 12
-BAND_PADDING = 7
-RADIUS = 16
+PADDING = 13
+RADIUS = 14
 # About how large a cell is: the grid has as many as come closest to it
 CELL = (190, 136)
 # A tile's size in cells, across x down
 SIZES = ('auto', '1x1', '2x1', '3x1', '4x1', '1x2', '2x2')
 # Text sizes: the most and least a tile's name and value may be, an on or off's most, and the least an auto tile's
 # value may be in one cell before it's two
-NAME_SIZES = (20, 14)
-VALUE_SIZES = (48, 16)
-STATE_SIZE = 24
+NAME_SIZES = (18, 14)
+VALUE_SIZES = (40, 16)
+STATE_SIZE = 26
 AUTO_LEAST = 22
 LINE_GAP = 4
+# A page's layout, and a room row's: the room's name, the gaps, the least and most a row is high, the least a button is
+# wide, and a button's text
+LAYOUTS = ('tiles', 'rooms')
+ROOM_NAME_WIDTH = 124
+ROOM_GAP = 8
+ROOM_ROW_LEAST, ROOM_ROW_MOST = 44, 76
+ROOM_TILE_LEAST = 100
+ROOM_PADDING = 10
+ROOM_TILE_NAME, ROOM_TILE_VALUE = 15, 20
+ROOM_TEXT = 20
+# A number's unit, beside it: how much smaller, and the least it may be
+UNIT_TO_NUMBER = 0.5
+UNIT_LEAST = 14
+UNIT_GAP = 5
 # The tiles' text: sized to each tile, or (name, value) the same on every one
 # A page's text: its tiles' names and their content each sized to the tile ('fit'), or one size on every tile (shrinking
 # only what's too long for its tile at that size)
@@ -78,15 +99,14 @@ VALUE_TEXT = {'xlarge': 56, 'large': 42, 'medium': 30, 'small': 22}
 NAME_TEXTS = ('fit',) + tuple(NAME_TEXT)
 VALUE_TEXTS = ('fit',) + tuple(VALUE_TEXT)
 # How a sensor shows its value: as it is, along a range, or with its history; and the hours a history can be
-SHOWS = ('value', 'gauge', 'graph')
+# (the weather's: as it is now, the same under today's date, or tomorrow's forecast)
+SHOWS = ('value', 'gauge', 'graph', 'today', 'tomorrow')
 HOURS = (1, 3, 6, 12, 24, 48, 168)
 # A tile's icon: none, the one that suits its kind, or one of kinds.ICONS
 ICON_CHOICES = ('none', 'auto') + kinds.ICONS
-ICON_MOST = 56
-ICON_GAP = 10
-# With the content one size, an icon's size for it
-ICON_TO_TEXT = 1.4
-GAUGE_HEIGHT = 12
+ICON_SIZE = 24
+ICON_GAP = 8
+GAUGE_HEIGHT = 7
 # How long a history is kept before it's asked for again (a tile's graph adds what changes in between), and how
 # long after asking failed
 HISTORY_FRESH = 15 * 60
@@ -94,19 +114,36 @@ HISTORY_RETRY = 60
 # How long a press is held to open a light's controls or a sensor's history
 LONG_PRESS = 0.6
 # The entities a tile can be, and which of them toggle
-DOMAINS = ('light', 'switch', 'sensor', 'binary_sensor')
-TOGGLES = ('light', 'switch')
+DOMAINS = ('light', 'switch', 'cover', 'sensor', 'binary_sensor', 'weather')
+TOGGLES = ('light', 'switch', 'cover')
 MOST_TILES = 12
 MOST_PAGES = 6
 LONG_DECIMALS = re.compile(r'-?\d+\.\d{3,}')
+# A value that starts with a number: the number, and what follows it
+NUMBERED = re.compile(r'(-?\d[\d.,]*)\s*(.*)')
+
+
+def same_day(text, day):
+    """Whether an ISO time falls on day (a local time's struct), here."""
+    try:
+        when = time.localtime(datetime.fromisoformat(text).timestamp())
+    except (TypeError, ValueError):
+        return False
+    return (when.tm_year, when.tm_yday) == (day.tm_year, day.tm_yday)
+
+
+def sentence(text):
+    """A state Home Assistant gives in lower case (power_saving) as words (Power saving); anything else as it is."""
+    return text.replace('_', ' ').capitalize() if text[:1].isalpha() and text.islower() else text
 
 
 class Page:
-    """A page of tiles: its name, its tiles, and the size of their names (one of NAME_TEXTS) and of their content
-    (one of VALUE_TEXTS)."""
+    """A page of tiles: its name, its tiles, the size of their names (one of NAME_TEXTS) and of their content (one of
+    VALUE_TEXTS), and its layout (one of LAYOUTS): a grid of tiles, or a row for each room."""
 
-    def __init__(self, name, tiles, name_size='fit', value_size='fit'):
+    def __init__(self, name, tiles, name_size='fit', value_size='fit', layout='tiles'):
         self.name, self.tiles = name, list(tiles)[:MOST_TILES]
+        self.layout = layout if layout in LAYOUTS else 'tiles'
         self.name_size = name_size if name_size in NAME_TEXTS else 'fit'
         self.value_size = value_size if value_size in VALUE_TEXTS else 'fit'
 
@@ -152,9 +189,10 @@ def ago(text, now):
 class Tile:
     """A Home Assistant entity on the screen. name: the page's own for it, or None for Home Assistant's; size: one of
     SIZES; icon: one of ICON_CHOICES; show: one of SHOWS (a sensor's); hours: its history's, one of HOURS; gauge: the
-    range a gauge shows (low, high), or None for the one that suits its kind."""
+    range a gauge shows (low, high), or None for the one that suits its kind; group: the room it's in, on a page laid
+    out in rooms."""
 
-    def __init__(self, entity_id, name=None, size='auto', icon='none', show='value', hours=24, gauge=None):
+    def __init__(self, entity_id, name=None, size='auto', icon='none', show='value', hours=24, gauge=None, group=None):
         self.entity_id = entity_id
         self.domain = entity_id.split('.', 1)[0]
         self.name = name
@@ -163,6 +201,8 @@ class Tile:
         self.show = show if show in SHOWS else 'value'
         self.hours = hours if hours in HOURS else 24
         self.gauge = tuple(gauge) if gauge else None
+        self.group = group
+        self.compact = False  # a slim button in a room's row, not a tile in the grid
         self.span = (1, 1)  # the cells it has, across and down
         self.box = None  # None when it doesn't fit
 
@@ -177,18 +217,54 @@ class Tile:
         if self.domain == 'binary_sensor':
             on = value == 'on'
             return title, kinds.on_off(attributes.get('device_class'))[0 if on else 1], on, True
+        if self.domain == 'cover':
+            return title, sentence(value), value in ('open', 'opening'), True
+        if self.domain == 'weather':
+            return self.weather(state, title, value, time.time() if now is None else now)
         if self.domain in TOGGLES:
             on = value == 'on'
             text = 'On' if on else 'Off'
             if on and self.domain == 'light' and attributes.get('brightness') is not None:
-                text += ' · {}%'.format(brightness_percent(attributes['brightness']))
+                text = '{}%'.format(brightness_percent(attributes['brightness']))
             return title, text, on, True
         if attributes.get('device_class') == 'timestamp':
             when = ago(value, time.time() if now is None else now)
             if when:
                 return title, when, False, True
         unit = attributes.get('unit_of_measurement')
-        return title, short_number(value) + (' ' + unit if unit else ''), False, True
+        return title, short_number(value) + ' ' + unit if unit else sentence(short_number(value)), False, True
+
+    def dated(self, day):
+        """The tile's name, if it has one, and day (a local time's struct) in words."""
+        words = '{} {} {}'.format(time.strftime('%A', day), day.tm_mday, time.strftime('%B', day))
+        return '{} · {}'.format(self.name, words) if self.name else words
+
+    def weather(self, state, title, condition, now):
+        """look's answer for a weather entity: as it is now, or tomorrow from the "forecast" that's with its state."""
+        attributes = state.get('attributes') or {}
+        unit = attributes.get('temperature_unit', '')
+        if self.show == 'tomorrow':
+            day = time.localtime(now + 86400)
+            found = next((entry for entry in state.get('forecast') or () if same_day(entry.get('datetime'), day)), None)
+            if found is None or found.get('temperature') is None:
+                return self.dated(day), '—', False, False
+            low = '' if found.get('templow') is None else ' · low {}'.format(found['templow'])
+            return self.dated(day), '{} {}{} · {}'.format(found['temperature'], unit, low,
+                                                          kinds.weather(found.get('condition') or '')), False, True
+        if self.show == 'today':
+            title = self.dated(time.localtime(now))
+        temperature = attributes.get('temperature')
+        words = kinds.weather(condition)
+        return title, words if temperature is None else '{} {} · {}'.format(temperature, unit, words), False, True
+
+    def mood(self, state):
+        """How it stands out: 'lit' (on, open or active), 'alert' (something's wrong) or 'calm'."""
+        _, _, on, available = self.look(state)
+        if not available:
+            return 'calm'
+        if self.domain == 'binary_sensor':
+            return kinds.mood(kinds.device_class(state), on)
+        return 'lit' if on else 'calm'
 
     def toggles(self):
         return self.domain in TOGGLES
@@ -209,7 +285,7 @@ class Tile:
     def showing(self, state):
         """How it shows its value now: 'gauge' or 'graph' only when it can (a number, or a graph of on and off),
         'value' otherwise."""
-        if self.show == 'value' or not (state and state.get('state') not in (None, 'unavailable', 'unknown')):
+        if self.show not in ('gauge', 'graph') or not (state and state.get('state') not in (None, 'unavailable', 'unknown')):
             return 'value'
         if self.domain == 'binary_sensor':
             return 'graph' if self.show == 'graph' else 'value'
@@ -270,6 +346,7 @@ class Panel:
         self.grid = (1, 1)
         self.cell_width = 0
         self.tabs = []  # each page's tab in the bar: (left, right), with more than one page
+        self.rooms = []  # the shown page's rooms' names: (name, top, bottom)
         self.start = None  # where the touch went down, for a swipe
         self.swiping = False
         self.pressed = None
@@ -315,6 +392,10 @@ class Panel:
         top = BAR_HEIGHT + MARGIN
         width, height = self.width - 2 * MARGIN, self.height - MARGIN - top
         columns, rows = self.grid = cells(width, height)
+        self.rooms = []
+        if self.pages[self.page].layout == 'rooms':
+            self.layout_rooms(top, height)
+            return
         cell_width = self.cell_width = (width - (columns - 1) * GAP) / columns
         cell_height = (height - (rows - 1) * GAP) / rows
         free = [[True] * columns for _ in range(rows)]
@@ -336,17 +417,45 @@ class Panel:
             self.tiles.append(tile)
         self.left_out = len(tiles) - len(self.tiles)
 
+    def layout_rooms(self, top, height):
+        """A row for each room (the first tile with its group sets where it comes), its buttons lined up in columns
+        down the page; a room with more than a row has room for goes onto another. What doesn't fit is left off."""
+        tiles = self.pages[self.page].tiles
+        groups = {}
+        for tile in tiles:
+            groups.setdefault(tile.group or '', []).append(tile)
+            tile.box, tile.compact = None, True
+        left = MARGIN + ROOM_NAME_WIDTH
+        width = self.width - MARGIN - left
+        columns = max(1, min(max((len(group) for group in groups.values()), default=1),
+                             (width + ROOM_GAP) // (ROOM_TILE_LEAST + ROOM_GAP)))
+        lines = [('' if start else room, group[start:start + columns])
+                 for room, group in groups.items() for start in range(0, len(group), columns)]
+        rows = max(1, min(len(lines), (height + ROOM_GAP) // (ROOM_ROW_LEAST + ROOM_GAP)))
+        row_height = min(ROOM_ROW_MOST, (height - (rows - 1) * ROOM_GAP) / rows)
+        tile_width = (width - (columns - 1) * ROOM_GAP) / columns
+        self.tiles = []
+        for row, (room, line) in enumerate(lines[:rows]):
+            y = top + round(row * (row_height + ROOM_GAP))
+            bottom = y + round(row_height)
+            if room:
+                self.rooms.append((room, y, bottom))
+            for column, tile in enumerate(line):
+                x = left + round(column * (tile_width + ROOM_GAP))
+                tile.box = (x, y, x + round(tile_width), bottom)
+                self.tiles.append(tile)
+        self.left_out = len(tiles) - len(self.tiles)
+
     def wanted(self, tile):
         """The cells a tile wants (across, down), no more than the grid has: its size, or for 'auto' one cell, or two
-        across when its value wouldn't fit in one in two lines (at AUTO_LEAST, or the content's size), beside its
-        icon if it has one."""
+        across when its value wouldn't fit in one in two lines (at AUTO_LEAST, or the content's size)."""
         if tile.size != 'auto':
             across, down = (int(n) for n in tile.size.split('x'))
         else:
             state = self.state(tile.entity_id)
             _, value, _, available = tile.look(state)
             size = AUTO_LEAST if self.value_text == 'fit' else VALUE_TEXT[self.value_text]
-            width = self.cell_width - 2 * PADDING - (ICON_MOST * 3 // 4 + ICON_GAP if tile.icon_name(state) else 0)
+            width = self.cell_width - 2 * PADDING
             fits = not (tile.says_more() and available) or self.wrapped(value, width, 2, (size, size), shorten=False)
             across, down = (1, 1) if fits else (2, 1)
         return min(across, self.grid[0]), min(down, self.grid[1])
@@ -496,32 +605,61 @@ class Panel:
             return self.status
         return "1 tile doesn't fit" if self.left_out == 1 else "{} tiles don't fit".format(self.left_out)
 
-    def draw_tile(self, tile):
+    def colours(self, tile, state, available):
+        """(its fill, its name's colour, its icon's) for what it says now."""
+        fill, name, icon = {'lit': (LIT, LIT_NAME, TILE_ON), 'alert': (ALERT, ALERT_NAME, ALERT_ICON),
+                            'calm': (TILE, MUTED, MUTED if available else FAINT)}[tile.mood(state)]
+        return tuple(min(255, c + PRESSED) for c in fill) if tile is self.pressed else fill, name, icon
+
+    def draw_compact(self, tile):
+        """A slim button in a room's row: its name, and its value under it."""
         left, top, right, bottom = tile.box
         state = self.state(tile.entity_id)
-        title, value, on, available = tile.look(state)
-        if on:
-            fill, band, text, muted = TILE_ON, BAND_ON, TEXT_ON, TEXT_ON
-        else:
-            fill, band, text, muted = TILE, BAND, TEXT if available else MUTED, TEXT if available else FAINT
-        if tile is self.pressed:
-            fill, band = (tuple(min(255, c + PRESSED) for c in colour) for colour in (fill, band))
-        inside = right - left - 2 * PADDING
+        title, value, _, available = tile.look(state)
+        fill, name_colour, _ = self.colours(tile, state, available)
+        self.draw.rectangle(tile.box, fill=BACKGROUND)
+        self.draw.rounded_rectangle((left, top, right - 1, bottom - 1), radius=RADIUS // 2 + 2, fill=fill)
+        inside = right - left - 2 * ROOM_PADDING
+        font = self.font(ROOM_TILE_NAME)
+        self.draw.text((left + ROOM_PADDING, (top + (top + bottom) // 2) // 2 + 2), self.shortened(title, font, inside), font=font,
+                       fill=name_colour, anchor='lm')
+        font = self.font(ROOM_TILE_VALUE)
+        self.draw.text((left + ROOM_PADDING, bottom - ROOM_PADDING), self.shortened(value, font, inside), font=font,
+                       fill=TEXT if available else FAINT, anchor='ls')
+        return tile.box
+
+    def draw_rooms(self):
+        """The rooms' names, beside their rows."""
+        font = self.font(ROOM_TEXT)
+        for name, top, bottom in self.rooms:
+            self.draw.text((MARGIN, (top + bottom) // 2), self.shortened(name, font, ROOM_NAME_WIDTH - ROOM_GAP), font=font,
+                           fill=MUTED, anchor='lm')
+
+    def draw_tile(self, tile):
+        if tile.compact:
+            return self.draw_compact(tile)
+        left, top, right, bottom = tile.box
+        state = self.state(tile.entity_id)
+        title, value, _, available = tile.look(state)
+        fill, name_colour, icon_colour = self.colours(tile, state, available)
+        value_colour = TEXT if available else FAINT
         self.draw.rectangle(tile.box, fill=BACKGROUND)
         self.draw.rounded_rectangle((left, top, right - 1, bottom - 1), radius=RADIUS, fill=fill)
 
-        # The name, in a band across the top: one line if it fits, or two
+        # The name along the top, one line if it fits or two, and the icon small in the corner
+        inside = right - left - 2 * PADDING
+        name = tile.icon_name(state)
+        if name:
+            icons.draw(self.image, name, right - PADDING - ICON_SIZE, top + PADDING - 1, ICON_SIZE, icon_colour)
+            inside -= ICON_SIZE + ICON_GAP
         font, lines = self.wrapped(title, inside, 2, self.name_sizes())
-        below = top + 2 * BAND_PADDING + len(lines) * font.size + (len(lines) - 1) * 3
-        self.draw.rounded_rectangle((left, top, right - 1, below), radius=RADIUS, fill=band,
-                                    corners=(True, True, False, False))
-        y = top + BAND_PADDING
+        y = top + PADDING
         for line in lines:
-            self.draw.text((left + PADDING, y), line, font=font, fill=text)
+            self.draw.text((left + PADDING, y), line, font=font, fill=name_colour)
             y += font.size + 3
 
-        # Below it: the value (beside its icon), and its gauge or graph under that
-        body = [left + PADDING, below + PADDING, right - PADDING, bottom - PADDING]
+        # At the foot: the value, and its gauge or graph under that
+        body = [left + PADDING, y + LINE_GAP, right - PADDING, bottom - PADDING]
         showing = tile.showing(state)
         chart = None
         if showing != 'value':
@@ -530,47 +668,55 @@ class Panel:
                            else height - GAUGE_HEIGHT - PADDING)
             chart = (body[0], body[1] + text_height + PADDING // 2, body[2], body[3])
             body[3] = body[1] + text_height
-        name = tile.icon_name(state)
-        if name:
-            # As large as the text allows, its foot on the value's line
-            most = ICON_MOST if self.value_text == 'fit' else round(VALUE_TEXT[self.value_text] * ICON_TO_TEXT)
-            side = int(min(body[3] - body[1], most, (body[2] - body[0]) // 3))
-            top = body[3] - side if showing == 'value' else (body[1] + body[3] - side) // 2
-            icons.draw(self.image, name, body[0], top, side, text if on else (TILE_ON if available else FAINT))
-            body[0] += side + ICON_GAP
-        self.draw_value(tile, value, body, muted, available and showing == 'value')
+        self.draw_value(tile, value, body, value_colour, name_colour, available and showing == 'value')
         if showing == 'gauge':
-            self.draw_gauge(tile, state, chart, on)
+            self.draw_gauge(tile, state, chart)
         elif showing == 'graph':
-            self.draw_graph(tile, chart, on)
+            self.draw_graph(tile, chart)
         return tile.box
 
-    def draw_value(self, tile, value, box, colour, more_lines):
-        """The value at the bottom of box, sized to it: one line for on or off, a sensor's onto more when it's long."""
+    def draw_value(self, tile, value, box, colour, quiet, more_lines):
+        """The value at the bottom of box: a number large with its unit small (in the colour quiet), otherwise words,
+        on one line for on or off, a sensor's onto a second when it's long."""
         left, top, right, bottom = box
         sizes = self.value_sizes(tile)
-        if tile.says_more() and more_lines:
-            font, lines = self.fitted(value, right - left, bottom - top, sizes, 3)
-        else:
-            font, lines = self.fitted(value, right - left, bottom - top, sizes, 1)
+        numbered = NUMBERED.fullmatch(value) if tile.says_more() else None
+        if numbered and self.draw_number(*numbered.groups(), box, sizes, colour, quiet):
+            return
+        if tile.says_more() and self.value_text == 'fit':
+            sizes = STATE_SIZE, sizes[1]
+        font, lines = self.fitted(value, right - left, bottom - top, sizes, 2 if tile.says_more() and more_lines else 1)
         y = bottom - (len(lines) - 1) * (font.size + LINE_GAP)
         for line in lines:
             self.draw.text((left, y), line, font=font, fill=colour, anchor='ls')
             y += font.size + LINE_GAP
 
-    def draw_gauge(self, tile, state, box, on):
+    def draw_number(self, number, unit, box, sizes, colour, quiet):
+        """A number and its unit on the line at box's foot, as large as they fit; False if they don't."""
+        left, top, right, bottom = box
+        for size in range(min(sizes[0], bottom - top), sizes[1] - 1, -2):
+            font, small = self.font(size), self.font(max(UNIT_LEAST, round(size * UNIT_TO_NUMBER)))
+            width = self.draw.textlength(number, font=font)
+            if width + (UNIT_GAP + self.draw.textlength(unit, font=small) if unit else 0) <= right - left:
+                self.draw.text((left, bottom), number, font=font, fill=colour, anchor='ls')
+                if unit:
+                    self.draw.text((left + width + UNIT_GAP, bottom), unit, font=small, fill=quiet, anchor='ls')
+                return True
+        return False
+
+    def draw_gauge(self, tile, state, box):
         left, _, right, bottom = box
         top = bottom - GAUGE_HEIGHT
         low, high = tile.gauge_range(state)
         fraction = min(1, max(0, (charts.number(state['state']) - low) / (high - low)))
         radius = GAUGE_HEIGHT // 2
-        self.draw.rounded_rectangle((left, top, right - 1, bottom - 1), radius=radius, fill=BAND_ON if on else BAND)
+        self.draw.rounded_rectangle((left, top, right - 1, bottom - 1), radius=radius, fill=TRACK)
         filled = left + round((right - left) * fraction)
         if filled > left:
             self.draw.rounded_rectangle((left, top, max(filled, left + 2 * radius) - 1, bottom - 1), radius=radius,
-                                        fill=TEXT_ON if on else TILE_ON)
+                                        fill=TILE_ON)
 
-    def draw_graph(self, tile, box, on):
+    def draw_graph(self, tile, box):
         """The tile's history (as much as has come): a line, or a binary sensor's timeline."""
         found = self.history_for(tile.entity_id, tile.hours)
         if not found or not found.points:
@@ -578,11 +724,9 @@ class Panel:
         end = self.wall()
         start = end - tile.hours * 3600
         if tile.domain == 'binary_sensor':
-            charts.timeline(self.draw, box, found.points, start, end, TEXT_ON if on else TILE_ON,
-                            BAND_ON if on else BAND, radius=4)
+            charts.timeline(self.draw, box, found.points, start, end, TILE_ON, TRACK, radius=4)
         else:
-            charts.line(self.draw, box, found.points, start, end, TEXT_ON if on else TILE_ON,
-                        fill=BAND_ON if on else GRAPH_FILL)
+            charts.line(self.draw, box, found.points, start, end, TILE_ON, fill=GRAPH_FILL)
 
     # Histories, for graphs
 
@@ -660,6 +804,7 @@ class Panel:
         else:
             for tile in self.tiles:
                 self.draw_tile(tile)
+            self.draw_rooms()
             self.draw_hint()
         self.screen.show(self.image)
         self.shown = True
@@ -680,7 +825,8 @@ class Panel:
                 self.detail.changed()
             return
         shown = [tile for tile in self.pages[self.page].tiles if entity_ids is None or tile.entity_id in entity_ids]
-        if any(tile.size == 'auto' and self.wanted(tile) != tile.span for tile in shown):
+        if self.pages[self.page].layout != 'rooms' and any(tile.size == 'auto' and self.wanted(tile) != tile.span
+                                                           for tile in shown):
             # An auto tile's value is now longer or shorter than one cell has room for
             self.layout()
             self.show_all()
@@ -803,7 +949,7 @@ class Panel:
             else:
                 for tile in self.tiles:
                     state = self.state(tile.entity_id)
-                    if tile.shows_time(state) or tile.showing(state) == 'graph':
+                    if tile.shows_time(state) or tile.showing(state) == 'graph' or tile.show in ('today', 'tomorrow'):
                         self.screen.show(self.image, self.draw_tile(tile))
         if self.awake and self.timeout and self.clock() - self.touched_at >= self.timeout:
             self.sleep()

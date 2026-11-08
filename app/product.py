@@ -9,13 +9,14 @@ import asyncio
 import json
 import os
 import re
+import time
 from pathlib import Path
 
 from base.log import Log
 from base.settings import Setting, is_int, is_text
 from ha import HomeAssistant, check_address
-from panel import (DOMAINS, HOURS, ICON_CHOICES, MOST_PAGES, MOST_TILES, NAME_TEXTS, SHOWS, SIZES, VALUE_TEXTS, Page,
-                   Tile)
+from panel import (DOMAINS, HOURS, ICON_CHOICES, LAYOUTS, MOST_PAGES, MOST_TILES, NAME_TEXTS, SHOWS, SIZES, VALUE_TEXTS,
+                   Page, Tile)
 
 NAME = 'HA Control Panel'
 VERSION = json.loads((Path(__file__).parent / 'app.json').read_text(encoding='utf-8'))['version']
@@ -23,12 +24,16 @@ TAG = 'PANEL'
 ENTITY_ID = re.compile(r'([a-z_]+)\.[a-z0-9_]+')
 LONGEST_NAME = 32
 LONGEST_PAGE_NAME = 20
-TILE_KEYS = {'entity_id', 'name', 'size', 'icon', 'show', 'hours', 'gauge'}
+LONGEST_ROOM = 20
+TILE_KEYS = {'entity_id', 'name', 'size', 'icon', 'show', 'hours', 'gauge', 'group'}
 # A page's: text was its names' and content's size together (2026-11-03, briefly), kept so a page saved with it loads
-PAGE_KEYS = {'name', 'tiles', 'name_size', 'value_size', 'text'}
+PAGE_KEYS = {'name', 'tiles', 'name_size', 'value_size', 'text', 'layout'}
 OLD_TEXTS = ('fit', 'large', 'medium', 'small')
 # How long the screen says an action failed
 FAILED_SECONDS = 5
+# How often a forecast is asked for, and how often whether it's time to
+FORECAST_EVERY = 30 * 60
+FORECAST_CHECK = 60
 
 
 def is_number(value):
@@ -38,7 +43,8 @@ def is_number(value):
 def check_tiles(value):
     """A Setting check for the tiles: [{"entity_id", "name", "size", "icon", "show", "hours", "gauge"}], all but
     entity_id optional: name (Home Assistant's otherwise), size one of SIZES ('auto'), icon one of ICON_CHOICES
-    ('none'), show one of SHOWS ('value'), hours one of HOURS (24), gauge [low, high] (the one that suits its kind)."""
+    ('none'), show one of SHOWS ('value'), hours one of HOURS (24), gauge [low, high] (the one that suits its kind),
+    group the room it's in on a page laid out in rooms."""
     if not isinstance(value, list) or len(value) > MOST_TILES:
         return 'must be a list of up to {} tiles'.format(MOST_TILES)
     seen = set()
@@ -48,12 +54,17 @@ def check_tiles(value):
         entity_id, name = tile.get('entity_id'), tile.get('name', '')
         found = ENTITY_ID.fullmatch(entity_id) if isinstance(entity_id, str) else None
         if not found or found.group(1) not in DOMAINS:
-            return 'has {!r}, which isn\'t a light, switch, sensor or binary sensor'.format(entity_id)
-        if entity_id in seen:
+            return 'has {!r}, which isn\'t a light, switch, blind, sensor, binary sensor or weather'.format(entity_id)
+        # (the weather may be on a page twice, as it is now and tomorrow)
+        key = entity_id, tile.get('show', 'value') if found.group(1) == 'weather' else None
+        if key in seen:
             return 'has {} twice'.format(entity_id)
-        seen.add(entity_id)
+        seen.add(key)
         if not isinstance(name, str) or len(name) > LONGEST_NAME:
             return 'has a name longer than {} characters'.format(LONGEST_NAME)
+        group = tile.get('group', '')
+        if not isinstance(group, str) or len(group) > LONGEST_ROOM:
+            return 'has a room name longer than {} characters'.format(LONGEST_ROOM)
         if tile.get('size', 'auto') not in SIZES:
             return 'has a size that isn\'t one of {}'.format(', '.join(SIZES))
         if tile.get('icon', 'none') not in ICON_CHOICES:
@@ -79,6 +90,8 @@ def check_pages(value):
     for page in value:
         if not isinstance(page, dict) or not {'name', 'tiles'} <= set(page) <= PAGE_KEYS:
             return 'must be pages of name, tiles, name_size and value_size'
+        if page.get('layout', 'tiles') not in LAYOUTS:
+            return "has a layout that isn't one of {}".format(', '.join(LAYOUTS))
         if page.get('name_size', 'fit') not in NAME_TEXTS:
             return "has a name size that isn't one of {}".format(', '.join(NAME_TEXTS))
         if page.get('value_size', 'fit') not in VALUE_TEXTS:
@@ -126,9 +139,10 @@ def configure(device):
 def chosen_pages(device):
     return [Page(page['name'], [Tile(tile['entity_id'], tile.get('name') or None, tile.get('size', 'auto'),
                                      tile.get('icon', 'none'), tile.get('show', 'value'), tile.get('hours', 24),
-                                     tile.get('gauge'))
+                                     tile.get('gauge'), tile.get('group') or None)
                                 for tile in page['tiles']],
-                 page.get('name_size', page.get('text', 'fit')), page.get('value_size', page.get('text', 'fit')))
+                 page.get('name_size', page.get('text', 'fit')), page.get('value_size', page.get('text', 'fit')),
+                 page.get('layout', 'tiles'))
             for page in device.settings.get('screen', 'pages')]
 
 
@@ -182,7 +196,33 @@ def routes(app, device):
 
 
 def tasks(device):
-    return [connection(device).run(), screen_task(device)]
+    return [connection(device).run(), screen_task(device), forecast_task(device)]
+
+
+def forecast_entities(pages):
+    """The weather entities whose tiles show tomorrow's forecast, each once."""
+    return list(dict.fromkeys(tile.entity_id for page in pages for tile in page.tiles
+                              if tile.domain == 'weather' and tile.show == 'tomorrow'))
+
+
+async def forecast_task(device):
+    """Keeps the forecasts up to date: Home Assistant doesn't send them as it does a state, so they're asked for, every
+    so often and at once when a tile starts to want one."""
+    ha = connection(device)
+    asked, again = None, 0
+    while True:
+        wanted = forecast_entities(chosen_pages(device))
+        if ha.connected and wanted and (wanted != asked or time.monotonic() >= again):
+            try:
+                for entity_id in wanted:
+                    ha.forecasts[entity_id] = await ha.daily_forecast(entity_id)
+                asked, again = wanted, time.monotonic() + FORECAST_EVERY
+                panel = getattr(device, 'panel', None)
+                if panel:
+                    panel.changed(set(wanted))
+            except Exception as e:  # not connected, timed out, or refused: asked again before long
+                Log.warn(TAG, "Couldn't get the forecast: {}".format(e))
+        await asyncio.sleep(FORECAST_CHECK)
 
 
 async def screen_task(device):
@@ -228,8 +268,13 @@ async def screen_task(device):
             Log.warn(TAG, "Couldn't get {}'s history: {}".format(entity_id, e))
             raise
 
-    panel = Panel(screen, state=lambda entity_id: ha.states.get(entity_id) if ha.connected else None,
-                  tapped=tapped, adjust=adjust, history=history)
+    def state(entity_id):
+        """An entity's state, with its forecast if it has one."""
+        found = ha.states.get(entity_id) if ha.connected else None
+        forecast = ha.forecasts.get(entity_id)
+        return dict(found, forecast=forecast) if found and forecast else found
+
+    panel = Panel(screen, state=state, tapped=tapped, adjust=adjust, history=history)
     device.panel = panel
     show_pages(device)
 

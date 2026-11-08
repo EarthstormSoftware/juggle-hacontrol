@@ -3,6 +3,7 @@ press opens (a light's controls, a sensor's history: details.py), the screen goi
 changed drawn again, on a screen that records what it's shown."""
 import asyncio
 import time
+from datetime import datetime
 
 import pytest
 
@@ -152,7 +153,7 @@ def test_a_value_fits_in_its_room(text, size):
 
 
 @pytest.mark.parametrize('entity_id, expected', [
-    ('light.kitchen', ('Kitchen', 'On · 50%', True, True)),
+    ('light.kitchen', ('Kitchen', '50%', True, True)),
     ('light.porch', ('Porch', 'Off', False, True)),
     ('sensor.hall', ('Hall', '19.5 °C', False, True)),
     ('binary_sensor.door', ('Door', 'On', True, True)),
@@ -472,7 +473,7 @@ def test_with_one_text_size_every_tiles_value_is_that_size_and_each_page_has_its
         return real(xy, line, font=font, **kwargs)
     p.draw.text = text
     p.show_all()
-    assert values == {panel.VALUE_TEXT['small']}
+    assert values - {panel.UNIT_LEAST} == {panel.VALUE_TEXT['small']}  # a unit is smaller than its number
     assert panel.NAME_TEXT['large'] in names and max(names - {26}) == panel.NAME_TEXT['large']  # 26: the clock's
     p.go_to(1)
     assert (p.name_text, p.value_text) == ('fit', 'fit')
@@ -576,3 +577,123 @@ def test_without_tiles_the_screen_says_where_to_choose_them():
     p.set_tiles([], hint='Choose tiles on http://panel.local')
     p.show_all()
     assert p.hint and screen.shown == [None]
+
+
+@pytest.mark.parametrize('device_class, on, mood', [
+    ('connectivity', True, 'calm'), ('connectivity', False, 'alert'), ('problem', True, 'alert'),
+    ('problem', False, 'calm'), ('motion', True, 'lit'), ('motion', False, 'calm'), (None, True, 'lit')])
+def test_colour_is_for_what_is_active_or_wrong_and_what_is_normal_stays_calm(device_class, on, mood):
+    state = {'state': 'on' if on else 'off', 'attributes': {'device_class': device_class}}
+    assert panel.Tile('binary_sensor.thing').mood(state) == mood
+
+
+def test_a_light_that_is_on_is_lit_and_one_that_is_unavailable_is_calm():
+    assert panel.Tile('light.a').mood({'state': 'on', 'attributes': {}}) == 'lit'
+    assert panel.Tile('light.a').mood({'state': 'unavailable', 'attributes': {}}) == 'calm'
+
+
+@pytest.mark.parametrize('value, text, is_open', [('open', 'Open', True), ('opening', 'Opening', True),
+                                                  ('closed', 'Closed', False)])
+def test_a_blind_says_where_it_is_and_a_tap_toggles_it(value, text, is_open):
+    tile = panel.Tile('cover.blind', 'Blind')
+    assert tile.look({'state': value, 'attributes': {}}) == ('Blind', text, is_open, True)
+    assert tile.toggles()
+
+
+@pytest.mark.parametrize('condition, words', [('cloudy', 'Cloudy'), ('partlycloudy', 'Partly cloudy'),
+                                              ('clear-night', 'Clear')])
+def test_the_weather_shows_its_temperature_and_condition(condition, words):
+    state = {'state': condition, 'attributes': {'temperature': 6.6, 'temperature_unit': '°C'}}
+    assert panel.Tile('weather.home').look(state)[1] == '6.6 °C · ' + words
+    assert not panel.Tile('weather.home').toggles()
+
+
+def test_a_state_in_lower_case_reads_as_words():
+    assert panel.sentence('power_saving') == 'Power saving'
+    assert panel.sentence('100.115.69.23') == '100.115.69.23' and panel.sentence('Standby') == 'Standby'
+
+
+def test_a_number_is_large_and_its_unit_small():
+    _, p, _, _ = make()
+    sizes = {}
+    real = p.draw.text
+
+    def text(xy, line, font=None, **kwargs):
+        sizes[line] = font.size
+        return real(xy, line, font=font, **kwargs)
+    p.draw.text = text
+    assert p.draw_number('7.4', '°C', (0, 0, 180, 60), panel.VALUE_SIZES, panel.TEXT, panel.MUTED)
+    assert sizes['7.4'] == panel.VALUE_SIZES[0] and sizes['°C'] == round(panel.VALUE_SIZES[0] * panel.UNIT_TO_NUMBER)
+
+
+def rooms():
+    return [panel.Tile('light.a', group='Kitchen'), panel.Tile('light.b', group='Kitchen'),
+            panel.Tile('switch.c', group='Office'), panel.Tile('light.d', group='Kitchen')]
+
+
+def test_a_page_of_rooms_has_a_row_for_each_with_its_buttons_lined_up():
+    _, p, _, _ = make()
+    tiles = rooms()
+    p.set_pages([panel.Page('Lights', tiles, layout='rooms')])
+    p.show_all()
+    assert [room[0] for room in p.rooms] == ['Kitchen', 'Office']
+    a, b, c, d = tiles
+    assert a.box[1] == b.box[1] == d.box[1] and c.box[1] > a.box[1]  # a room's tiles together, wherever they are listed
+    assert a.box[0] == c.box[0] and a.box[0] > panel.MARGIN + panel.ROOM_NAME_WIDTH - 1 and a.box[0] < b.box[0] < d.box[0]
+    assert p.left_out == 0 and p.tile_at(b.box[0] + 3, b.box[1] + 3) is b
+
+
+def test_a_room_with_more_than_a_row_has_room_for_goes_onto_another():
+    _, p, _, _ = make()
+    p.width = 400
+    tiles = rooms()
+    p.set_pages([panel.Page('Lights', tiles, layout='rooms')])
+    assert p.left_out == 0 and len(p.rooms) == 2
+    assert tiles[3].box[1] > tiles[0].box[1] and tiles[3].box[0] == tiles[0].box[0]
+
+
+def test_what_does_not_fit_in_rooms_is_left_off_and_the_bar_says_so():
+    _, p, _, _ = make()
+    p.height = 170
+    p.set_pages([panel.Page('Lights', [panel.Tile('light.%d' % n, group='Room %d' % n) for n in range(5)], layout='rooms')])
+    assert p.left_out > 0 and len(p.tiles) + p.left_out == 5 and 'fit' in p.warning()
+
+
+def test_a_page_of_rooms_stays_as_it_is_when_a_value_changes():
+    _, p, _, _ = make()
+    tiles = rooms()
+    p.set_pages([panel.Page('Lights', tiles, layout='rooms')])
+    p.show_all()
+    boxes = [t.box for t in tiles]
+    p.changed({'light.a'})
+    assert [t.box for t in tiles] == boxes
+
+
+def test_a_number_too_wide_for_its_tile_is_left_to_the_words():
+    _, p, _, _ = make()
+    assert not p.draw_number('123456789', 'Mbit/s', (0, 0, 40, 60), panel.VALUE_SIZES, panel.TEXT, panel.MUTED)
+
+
+WEATHER = {'state': 'cloudy', 'attributes': {'temperature': 6.3, 'temperature_unit': '°C'}}
+
+
+def local(year, month, day, hour=12):
+    return time.mktime((year, month, day, hour, 0, 0, 0, 0, -1))
+
+
+def test_the_weather_can_show_todays_date():
+    now = local(2026, 11, 8)
+    title, value, _, available = panel.Tile('weather.home', 'Outside', show='today').look(WEATHER, now=now)
+    assert (title, value, available) == ('Outside · Sunday 8 November', '6.3 °C · Cloudy', True)
+
+
+def test_tomorrows_forecast_is_tomorrows_entry():
+    now = local(2026, 11, 8)
+    days = [{'datetime': datetime.fromtimestamp(local(2026, 11, d, 12)).astimezone().isoformat(), 'temperature': t,
+             'templow': l, 'condition': 'fog'} for d, t, l in ((8, 6, 5), (9, 9.0, 1.0), (10, 2, 0))]
+    title, value, _, available = panel.Tile('weather.home', 'Tomorrow', show='tomorrow').look(dict(WEATHER, forecast=days), now=now)
+    assert (title, value, available) == ('Tomorrow · Monday 9 November', '9.0 °C · low 1.0 · Fog', True)
+
+
+def test_tomorrow_without_a_forecast_yet_says_nothing_of_it():
+    assert panel.Tile('weather.home', show='tomorrow').look(WEATHER, now=local(2026, 11, 8))[1:] == ('—', False, False)

@@ -161,6 +161,8 @@ class HomeAssistant:
         self.watched = []
         # The watched entities: {entity_id: {"state", "attributes"}}
         self.states = {}
+        # The weather entities' daily forecasts, as asked for: {entity_id: [{"datetime", "temperature", ...}]}
+        self.forecasts = {}
         self.status = 'not set up'
         self.connected = False
         self.version = None
@@ -316,7 +318,14 @@ class HomeAssistant:
         return await self.request({'type': 'call_service', 'domain': domain, 'service': service,
                                    'service_data': data, 'target': {'entity_id': entity_id}})
 
-    async def entities(self, domains=('light', 'sensor', 'binary_sensor', 'switch')):
+    async def daily_forecast(self, entity_id):
+        """A weather entity's forecast by the day: [{"datetime", "condition", "temperature", "templow", ...}]."""
+        found = await self.request({'type': 'call_service', 'domain': 'weather', 'service': 'get_forecasts',
+                                    'service_data': {'type': 'daily'}, 'target': {'entity_id': entity_id},
+                                    'return_response': True})
+        return (((found or {}).get('response') or {}).get(entity_id) or {}).get('forecast') or []
+
+    async def entities(self, domains=('light', 'sensor', 'binary_sensor', 'switch', 'cover', 'weather')):
         """Every entity in those domains, for choosing tiles: [{"entity_id", "name", "state", "unit", "kind" (what
         it is: "Motion sensor"), "icon" (the one that suits it), "numeric"}] by name."""
         found = []

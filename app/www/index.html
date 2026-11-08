@@ -88,6 +88,12 @@ form:has(#mqtt_enabled:checked) .mqtt-off{display:none}
 
   <div class="sec">Tiles</div>
   <div class="frow">
+    <div class="field"><label for="layout">Layout</label>
+      <select id="layout">
+        <option value="tiles">A grid of tiles</option>
+        <option value="rooms">A row for each room</option>
+      </select>
+    </div>
     <div class="field"><label for="name_size">Name Size</label>
       <select id="name_size">
         <option value="fit">Fitted to each tile</option>
@@ -233,8 +239,8 @@ var ICONS = [['bulb', '💡 Bulb'], ['plug', '🔌 Plug'], ['thermometer', '🌡
   ['bolt', '⚡ Bolt'], ['alert', '⚠️ Alert'], ['clock', '🕒 Clock'], ['gauge', '⏲️ Gauge'], ['signal', '📶 Signal'],
   ['lock', '🔒 Lock'], ['air', '💨 Air']];
 var HOURS = [[1, '1 h'], [3, '3 h'], [6, '6 h'], [12, '12 h'], [24, '24 h'], [48, '2 days'], [168, '7 days']];
-var DOMAINS = [['', 'All'], ['light', 'Lights'], ['switch', 'Switches'], ['sensor', 'Sensors'],
-  ['binary_sensor', 'Binary sensors']];
+var DOMAINS = [['', 'All'], ['light', 'Lights'], ['switch', 'Switches'], ['cover', 'Blinds'], ['sensor', 'Sensors'],
+  ['binary_sensor', 'Binary sensors'], ['weather', 'Weather']];
 var kinds = {};  // Home Assistant's entities: what each is ({kind, icon, numeric})
 var grid = { columns: 4, rows: 3 };
 var editing = null;  // the tile whose settings are open
@@ -260,6 +266,7 @@ function showPages() {
   });
   row.appendChild(add);
   el('page_name').value = page().name;
+  el('layout').value = page().layout;
   el('name_size').value = page().name_size;
   el('value_size').value = page().value_size;
   el('page_earlier').disabled = current === 0;
@@ -270,7 +277,7 @@ function showPages() {
 // What a tile's entity is: Home Assistant's word on it, or its domain's until that comes
 function kindOf(t) {
   return kinds[t.entity_id] || { kind: { light: 'Light', 'switch': 'Switch', sensor: 'Sensor',
-    binary_sensor: 'Binary sensor' }[domainOf(t)] || domainOf(t), icon: null, numeric: domainOf(t) === 'sensor' };
+    binary_sensor: 'Binary sensor', cover: 'Blind', weather: 'Weather' }[domainOf(t)] || domainOf(t), icon: null, numeric: domainOf(t) === 'sensor' };
 }
 
 function nameOf(t) { return t.name || names[t.entity_id] || t.entity_id; }
@@ -278,10 +285,13 @@ function nameOf(t) { return t.name || names[t.entity_id] || t.entity_id; }
 // A tile's line: what it is, and how it shows where that isn't as a tile would anyway
 function summary(t) {
   var k = kindOf(t), parts = [k.kind];
+  if (page().layout === 'rooms' && t.group) parts.unshift(t.group);
   if (t.size !== 'auto') parts.push(t.size.replace('x', '×'));
   var icon = t.icon === 'auto' ? k.icon : t.icon;
   if (t.icon !== 'none') parts.push(icon ? labelOf(ICONS, icon).split(' ')[0] : 'icon');
-  if (t.show !== 'value') parts.push((t.show === 'gauge' ? 'Gauge' : 'Graph') + (t.show === 'graph' ? ', ' + labelOf(HOURS, t.hours) : ''));
+  if (t.show === 'today') parts.push('With the date');
+  else if (t.show === 'tomorrow') parts.push('Tomorrow');
+  else if (t.show !== 'value') parts.push((t.show === 'gauge' ? 'Gauge' : 'Graph') + (t.show === 'graph' ? ', ' + labelOf(HOURS, t.hours) : ''));
   else if (t.hours !== 24) parts.push('History ' + labelOf(HOURS, t.hours));
   return parts.join(' · ');
 }
@@ -344,6 +354,11 @@ function tileEditor(t, n, shownName) {
     changed();
   });
   fields.push(field(id + 'name', 'Name', name));
+  if (page().layout === 'rooms') {
+    var room = Base.mk('input', { type: 'text', maxLength: 20, value: t.group, placeholder: 'Kitchen', autocomplete: 'off' });
+    room.addEventListener('input', function () { t.group = room.value; changed(); });
+    fields.push(field(id + 'group', 'Room', room));
+  }
   fields.push(field(id + 'size', 'Size', choice(SIZES, t.size, function (v) { t.size = v; showTiles(); })));
   var suits = k.icon ? labelOf(ICONS, k.icon) : '';
   fields.push(field(id + 'icon', 'Icon', choice([['none', 'None'], ['auto', suits ? 'Its kind\'s: ' + suits : 'Its kind\'s']].concat(ICONS),
@@ -354,6 +369,10 @@ function tileEditor(t, n, shownName) {
     if (d === 'binary_sensor' || k.numeric || t.show === 'graph') shows.push(['graph', 'Graph']);
     fields.push(field(id + 'show', 'Shows', choice(shows, t.show, function (v) { t.show = v; showTiles(); })));
     fields.push(field(id + 'hours', 'History', choice(HOURS, t.hours, function (v) { t.hours = Number(v); showTiles(); })));
+  }
+  if (d === 'weather') {
+    fields.push(field(id + 'show', 'Shows', choice([['value', 'Now'], ['today', 'Now, with the date'], ['tomorrow', 'Tomorrow']],
+      t.show, function (v) { t.show = v; showTiles(); })));
   }
   if (t.show === 'gauge') {
     var range = t.gaugeTyped || (t.gauge ? t.gauge.map(String) : ['', '']);
@@ -448,23 +467,24 @@ Base.onInfo(function (i) {
   if (pages !== null || !c) return;
   pages = c.screen.pages.map(function (p) {
     return { name: p.name, name_size: p.name_size || p.text || 'fit', value_size: p.value_size || p.text || 'fit',
-      tiles: p.tiles.map(newTile) };
+      layout: p.layout || 'tiles', tiles: p.tiles.map(newTile) };
   });
   if (!pages.length) pages.push(newPage());
   showKinds();
   showAll();
   loadEntities();
 });
-function newPage() { return { name: '', name_size: 'fit', value_size: 'fit', tiles: [] }; }
+function newPage() { return { name: '', name_size: 'fit', value_size: 'fit', layout: 'tiles', tiles: [] }; }
 // A tile as it's edited here, from one as it's saved (only what isn't as it would be anyway is saved)
 function newTile(t) {
   return { entity_id: t.entity_id, name: t.name || '', size: t.size || 'auto', icon: t.icon || 'none',
-    show: t.show || 'value', hours: t.hours || 24, gauge: t.gauge || null };
+    show: t.show || 'value', hours: t.hours || 24, gauge: t.gauge || null, group: t.group || '' };
 }
 el('page_name').addEventListener('input', function () { page().name = el('page_name').value; showPages(); changed(); });
 ['name_size', 'value_size'].forEach(function (id) {
   el(id).addEventListener('change', function () { page()[id] = el(id).value; changed(); });
 });
+el('layout').addEventListener('change', function () { page().layout = el('layout').value; showTiles(); changed(); });
 function movePage(by) {
   return function () { pages.splice(current + by, 0, pages.splice(current, 1)[0]); current += by; showAll(); changed(); };
 }
@@ -497,10 +517,12 @@ el('tiles_save').addEventListener('click', function () {
       if (t.show !== 'value') tile.show = t.show;
       if (t.hours !== 24) tile.hours = t.hours;
       if (t.show === 'gauge' && t.gauge) tile.gauge = t.gauge;
+      if (t.group.trim()) tile.group = t.group.trim();
       return tile;
     }) };
     if (p.name_size !== 'fit') one.name_size = p.name_size;
     if (p.value_size !== 'fit') one.value_size = p.value_size;
+    if (p.layout !== 'tiles') one.layout = p.layout;
     return one;
   });
   var bad = [].concat.apply([], pages.map(function (p) { return p.tiles; })).filter(function (t) {

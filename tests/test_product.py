@@ -7,6 +7,7 @@ import pytest
 
 import icons
 import kinds
+import panel
 import product
 from base.device import Device
 
@@ -123,3 +124,31 @@ def test_the_pages_icons_are_the_ones_the_screen_draws():
     page = (product.Path(product.__file__).parent / 'www' / 'index.html').read_text(encoding='utf-8')
     listed = re.search(r'var ICONS = \[(.*?)\];', page, re.S).group(1)
     assert tuple(re.findall(r"\['(\w+)', '", listed)) == kinds.ICONS == tuple(icons.DRAWN)
+
+
+@pytest.mark.parametrize('layout, bad', [('rooms', False), ('tiles', False), ('columns', True)])
+def test_a_page_may_be_laid_out_in_rooms(layout, bad):
+    page = {'name': 'Lights', 'layout': layout, 'tiles': [{'entity_id': 'light.a', 'group': 'Kitchen'}]}
+    assert bool(product.check_pages([page])) is bad
+
+
+def test_a_room_name_can_only_be_so_long():
+    assert product.check_pages([{'name': 'L', 'tiles': [{'entity_id': 'light.a', 'group': 'x' * 21}]}])
+
+
+@pytest.mark.parametrize('entity_id', ['cover.blind', 'weather.home'])
+def test_blinds_and_the_weather_can_be_tiles(entity_id):
+    assert product.check_pages([{'name': 'H', 'tiles': [{'entity_id': entity_id}]}]) is None
+
+
+def test_the_weather_may_be_on_a_page_as_it_is_now_and_tomorrow_but_nothing_else_twice():
+    weather = [{'entity_id': 'weather.home', 'show': 'today'}, {'entity_id': 'weather.home', 'show': 'tomorrow'}]
+    assert product.check_tiles(weather) is None
+    assert product.check_tiles(weather + [{'entity_id': 'weather.home', 'show': 'tomorrow'}])
+    assert product.check_tiles([{'entity_id': 'light.a'}, {'entity_id': 'light.a'}])
+
+
+def test_only_tiles_showing_tomorrow_ask_for_a_forecast():
+    pages = [panel.Page('H', [panel.Tile('weather.home', show='today'), panel.Tile('weather.home', show='tomorrow'),
+                              panel.Tile('weather.other'), panel.Tile('sensor.a')])]
+    assert product.forecast_entities(pages) == ['weather.home']
