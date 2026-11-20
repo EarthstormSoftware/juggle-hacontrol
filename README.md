@@ -8,7 +8,30 @@ It's built on [App Base](https://github.com/EarthstormSoftware/app-base), from
 [Juggle Hello](https://github.com/EarthstormSoftware/juggle-hello). The design and the steps are in
 [docs/roadmap.md](docs/roadmap.md).
 
-**Status:** started. It's still Juggle Hello's greeting while the screen is written.
+**Status:** working, and running on the author's Pi. Not yet versioned 1.0: the pages and settings may still
+change.
+
+![A page of tiles](docs/sample/home.png)
+
+## What it does
+
+- **Tiles** for Home Assistant's lights, switches, blinds, sensors, binary sensors and the weather. Tap a light or
+  switch to toggle it; **long press** a light for its brightness, warmth, colour and effect, or a sensor for its
+  history.
+- **Pages**, swiped or chosen in the bar, each laid out as a grid of tiles (sizes from 1x1 to 4x1 and 2x2) or as a row
+  for each room.
+- A sensor can show its value, a gauge, a graph of its history, or the weather today or tomorrow. Icons are chosen
+  from the entity's kind, or by you.
+- The screen goes dark after a time you choose and wakes on a touch; its brightness and rotation are settings too.
+- All of it, and the Home Assistant address and token, is set on the app's web page at `http://<name>.local`, saved
+  on the Pi (`/data/app-state`), never in this repository.
+
+| Rooms | Climate |
+|---|---|
+| ![Tiles in rooms](docs/sample/rooms.png) | ![Gauges and values](docs/sample/climate.png) |
+
+These screenshots are drawn from made-up Home Assistant states by `docs/sample/render_sample.py`, using the panel's
+own drawing code. A portrait screen is supported too (`docs/sample/home-portrait.png`).
 
 ## What it needs
 
