@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops
 
-from base.log import Log
+from base import pi
 
 TAG = 'SCREEN'
 
@@ -150,44 +150,6 @@ def touch_device():
     return None
 
 
-class Backlight:
-    """The display's backlight, which Juggle OS lets an app with "display" change: on, off, and how bright."""
-    FOLDER = Path('/sys/class/backlight')
-    POWER_ON, POWER_OFF = 0, 4  # bl_power: FB_BLANK_UNBLANK, FB_BLANK_POWERDOWN
-    GAMMA = 2.2
-    LEAST = 5  # the least brightness that can be set, in percent
-    DIMMEST = 0.15  # how bright the least looks (on the curve): any dimmer and the Touch Display looks off
-
-    def __init__(self, folder):
-        self.folder = folder
-        self.most = int((folder / 'max_brightness').read_text())
-
-    @classmethod
-    def find(cls):
-        try:
-            return next((cls(folder) for folder in sorted(cls.FOLDER.iterdir())), None)
-        except (OSError, ValueError):
-            return None
-
-    def _write(self, name, value):
-        try:
-            (self.folder / name).write_text(str(value))
-        except OSError as e:
-            Log.warn(TAG, "Couldn't set the backlight's {}: {}".format(name, e))
-
-    def on(self):
-        self._write('bl_power', self.POWER_ON)
-
-    def off(self):
-        self._write('bl_power', self.POWER_OFF)
-
-    def set_brightness(self, percent):
-        """percent as it looks: the eye sees the backlight's steps as much larger when it's dim, so the steps follow
-        a curve (GAMMA) and half looks about half as bright. The least (LEAST) looks DIMMEST, the most full."""
-        looks = self.DIMMEST + (1 - self.DIMMEST) * (percent - self.LEAST) / (100 - self.LEAST)
-        self._write('brightness', max(1, round(self.most * looks ** self.GAMMA)))
-
-
 class PiScreen:
     """The Touch Display on a Pi running Juggle OS."""
 
@@ -195,9 +157,7 @@ class PiScreen:
         self.framebuffer = Framebuffer.open(rotation)
         self.size = self.framebuffer.size
         self.show = self.framebuffer.show
-        self.backlight = Backlight.find()
-        if self.backlight:
-            self.backlight.on()  # it may have been left off when the app last stopped
+        self.backlight = pi.find_display()  # what turns the screen off and on: a backlight, or an HDMI display
 
     async def run(self, touched):
         """Calls touched(kind, x, y) for each touch, for as long as the app runs."""

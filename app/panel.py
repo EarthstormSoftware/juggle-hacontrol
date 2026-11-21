@@ -32,6 +32,8 @@ from datetime import datetime, timezone
 
 from PIL import Image, ImageDraw, ImageFont
 
+from base import pi
+
 import charts
 import icons
 import kinds
@@ -358,11 +360,8 @@ class Panel:
         self.status = None
         self.hint = None  # shown where the tiles go when there are none
         self.shown = False
-        # The screen goes dark after timeout seconds untouched (0: never); a touch on a dark screen only wakes it
-        self.timeout = 0
-        self.touched_at = clock()
-        self.awake = True
-        self.waking = False  # the touch that woke it, until it lifts
+        # The screen goes dark after the time set untouched; a touch on a dark screen only wakes it (base.pi.Screen)
+        self.power = pi.Screen(getattr(screen, 'backlight', None), clock=clock)
 
     def font(self, size):
         if size not in self._fonts:
@@ -839,15 +838,8 @@ class Panel:
 
     def touched(self, kind, x, y):
         """A touch from the screen: ('down' | 'move' | 'up', x, y)."""
-        self.touched_at = self.clock()
-        if not self.awake or self.waking:
-            # The touch that wakes the screen does nothing else
-            if not self.awake:
-                self.wake()
-                self.waking = True
-            if kind == 'up':
-                self.waking = False
-            return
+        if not self.power.input(lifted=kind == 'up'):
+            return  # the touch that wakes the screen does nothing else
         if self.detail:
             self.detail.touched(kind, x, y)
         elif kind == 'down':
@@ -921,22 +913,17 @@ class Panel:
 
     # The screen going dark, and waking
 
-    def sleep(self):
-        self.awake = False
+    @property
+    def awake(self):
+        return self.power.awake
+
+    def put_away(self):
+        """What's open goes away as the screen goes dark."""
         self.cancel_hold()
         self.pressed = None
         if self.detail:
             self.detail = None
             self.show_all()
-        backlight = getattr(self.screen, 'backlight', None)
-        if backlight:
-            backlight.off()
-
-    def wake(self):
-        self.awake = True
-        backlight = getattr(self.screen, 'backlight', None)
-        if backlight:
-            backlight.on()
 
     def tick(self):
         """Once a second: the bar when the minute changes (and the tiles that show how long ago), and the screen
@@ -951,8 +938,8 @@ class Panel:
                     state = self.state(tile.entity_id)
                     if tile.shows_time(state) or tile.showing(state) == 'graph' or tile.show in ('today', 'tomorrow'):
                         self.screen.show(self.image, self.draw_tile(tile))
-        if self.awake and self.timeout and self.clock() - self.touched_at >= self.timeout:
-            self.sleep()
+        if self.power.tick():
+            self.put_away()
 
     async def run(self):
         self.show_all()

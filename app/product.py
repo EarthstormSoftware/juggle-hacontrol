@@ -116,9 +116,9 @@ SETTINGS = {
     'screen': {
         # What the screen shows: pages of tiles, in order
         'pages': Setting([], check_pages),
-        # Dark after so many minutes without a touch (0: never), and how bright when it's on
+        # Dark after so many minutes without a touch (0: never): this panel's default is 5, the base's 0. How bright it
+        # is when it's on is the base's (brightness).
         'timeout_minutes': Setting(5, is_int(0, 240)),
-        'brightness': Setting(100, is_int(5, 100)),
     },
 }
 
@@ -157,10 +157,7 @@ def show_pages(device):
     connection(device).watch(watched(pages))
     panel = getattr(device, 'panel', None)
     if panel:
-        panel.timeout = device.settings.get('screen', 'timeout_minutes') * 60
-        backlight = getattr(panel.screen, 'backlight', None)
-        if backlight:
-            backlight.set_brightness(device.settings.get('screen', 'brightness'))
+        panel.power.apply(device.settings)
         panel.set_pages(pages, hint=None if any(page.tiles for page in pages) else 'Choose tiles on http://{}.local'
                         .format(device.platform.device_name()))
 

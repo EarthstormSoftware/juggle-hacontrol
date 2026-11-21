@@ -544,7 +544,7 @@ def test_one_page_has_no_tabs_and_shows_the_date():
 def test_the_screen_goes_dark_untouched_and_the_waking_touch_does_nothing_else():
     async def test():
         screen, p, tapped, _ = make()
-        p.timeout = 60
+        p.power.timeout = 60
         p.show_all()
         p.clock_.now += 59
         p.tick()
