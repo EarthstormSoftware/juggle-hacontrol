@@ -116,9 +116,6 @@ SETTINGS = {
     'screen': {
         # What the screen shows: pages of tiles, in order
         'pages': Setting([], check_pages),
-        # Dark after so many minutes without a touch (0: never): this panel's default is 5, the base's 0. How bright it
-        # is when it's on is the base's (brightness).
-        'timeout_minutes': Setting(5, is_int(0, 240)),
     },
 }
 
